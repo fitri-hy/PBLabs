@@ -21,6 +21,7 @@ import { chat } from "../net/chatClient";
 import { GM_HOTKEYS, gmActive, gmCheats, gmHooks, registerGmActions, resetGmCheats, setGmGate, type GmCheatState } from "./gmCheats";
 import { GmChams } from "./gmChams";
 import { GmEsp } from "./gmEsp";
+import { gmDetector } from "./gmDetector";
 import { NICK_SIZE, PosSlots, flySpeedStep, gmAction, gmNickView, nickSizeStep } from "./observerGm";
 import { KILL_MARKS, ShotKills } from "./pbHud/killmarks";
 import { EscMenu } from "./escMenu";
@@ -395,6 +396,15 @@ export class Game implements BotHost {
   private gmEuler = new THREE.Euler(0, 0, 0, "YXZ");
   private gmNoFallUntil = 0;
   private gmEspList: Actor[] = [];
+  private gmBurstFlip = false;
+  private gmBombCool = 0;
+  private gmGrenadeRefill = 0;
+  private gmDetTrackT = 0;
+  private gmDetTickT = 0;
+  private gmDetPrev = new Map<string, { x: number; z: number }>();
+  private gmDetDir = new Map<string, THREE.Vector3>();
+  private gmDetSpeed = new Map<string, number>();
+  private gmDetA = new THREE.Vector3(); private gmDetB = new THREE.Vector3(); private gmDetC = new THREE.Vector3();
 
   private constructor(d: GameDeps) {
     this.scene = d.scene;
@@ -555,6 +565,7 @@ export class Game implements BotHost {
     g.wireNet();
     g.match.onKill((k) => {
       g.hud.killfeed(k, g.me.id);
+      if (k.killer?.kind === "remote") { gmDetector.kill(k.killer.id, k.killer.name, k.killer.team, k.headshot); g.detWallKill(k.killer, k.victim, k.weapon); }
       if (k.killer === g.me && k.victim !== g.me && k.killer.team !== k.victim.team) {
         g.hud.registerOwnKill({ headshot: k.headshot, victimId: k.victim.id, weapon: k.weapon, ...g.shotKills.kill(k.victim.id), victimStreak: k.victimStreak ?? 0 });
       }
@@ -570,6 +581,7 @@ export class Game implements BotHost {
     g.offlineSpectate = g.net.mode === "local" && params.has("spectate");
     g.gmParam = params.has("gm");
     setGmGate(() => g.cheatOk());
+    gmDetector.onAlert = (name, why) => { if (gmActive()?.detectAlert) g.hud.notice(name, ` suspicious: ${why}`); };
     gmHooks.aimDir = (o, f) => { const gm = gmActive(); return gm?.silentAim ? g.gmAimDir(o, f, gm) : null; };
     registerGmActions({
       teleport: () => g.gmTeleportToCrosshair(),
@@ -769,7 +781,7 @@ export class Game implements BotHost {
       if (d >= ex.range) continue;
       dir.copy(chest).sub(at).normalize();
       const wall = this.world.castRay(new this.R.Ray({ x: at.x, y: at.y, z: at.z }, { x: dir.x, y: dir.y, z: dir.z }), d, true, undefined, WORLD_ONLY_QUERY);
-      if (wall && wall.timeOfImpact < d - 0.3) continue; // the prop's own broken colliders are gone; the map blocks
+      if (wall && wall.timeOfImpact < d - 0.3 && !(by === this.me && gmActive()?.wallbang)) continue; // the prop's own broken colliders are gone; the map blocks
       const dmg = Math.round(ex.damage * (1 - d / ex.range));
       if (dmg <= 0) continue;
       if (by === this.me) this.shotKills.hit(a.id, blast, true);
@@ -805,10 +817,13 @@ export class Game implements BotHost {
     let colliderHandle: number | undefined = wh?.collider.handle;
     let actorId: string | null = null;
     let zone: HitZone | null = null;
+    // GM wallbang: the shot ignores the world and reaches the first actor on the ray
+    let reach = shooter === this.me && gmActive()?.wallbang ? Infinity : dist;
     for (const a of this.actors()) {
       if (a === shooter || !a.alive) continue;
-      const h = rayVsActor(origin, dir, Math.min(dist, maxDist), a);
-      if (h && h.distance < dist) {
+      const h = rayVsActor(origin, dir, Math.min(reach, maxDist), a);
+      if (h && h.distance < reach) {
+        reach = h.distance;
         dist = h.distance;
         actorId = a.id;
         zone = h.zone;
@@ -843,12 +858,14 @@ export class Game implements BotHost {
       // Client-authoritative: tell the victim's client; it applies damage and reports the kill.
       const now = this.time;
       const wasAlive = target.alive;
+      const hpBefore = target.hp;
       const res = computeDamage({ target, attacker, base, zone, helmetPenetrate: pen, falloff, preScaled, now, room: this.room }); this.match.addDamage(attacker.id, res.dealt);
       // the victim's own state decides death: a predicted kill here would flip alive false -> true on the next state,
       // which RemoteActor.apply reads as a respawn (spawn-protection blink + helmet back on the head next to the dropped one)
       target.alive = wasAlive;
       const ev: HitEvent = { attackerId: attacker.id, victimId: target.id, weapon, zone, baseDamage: base, preScaled, helmetPenetrate: pen, falloff, point: [point.x, point.y, point.z], t: now, helmetBlocked: res.helmetBlocked };
       this.net.sendHit(ev);
+      if (attacker === this.me && !res.helmetBlocked) gmDetector.hitSent(target.id, target.name, target.team, hpBefore, res.dealt, now);
       // shooter side: the remote victim's helmet flies off here too; its banner + voice are the victim's own
       if (res.helmetBlocked) this.popHelmet(target, attacker);
       else this.popBeret(target, attacker, zone, res.blocked);
@@ -1549,7 +1566,8 @@ export class Game implements BotHost {
       const pts = blastPoints(a);
       const o = { ...C4_BLAST, passes: 2, hp: a.hp };
       // without the WeaponSystem (?weapons=adapter dev mode) there is no world cast to block the lines
-      const hits = ws ? ws.blastHits(pts, c, o)
+      const bang = !!gmActive()?.wallbang && a !== this.me; // GM wallbang: the blast ignores walls for everyone else
+      const hits = ws && !bang ? ws.blastHits(pts, c, o)
         : explosionHits(o, { ikDist: pts.ik.distanceTo(c), rootDist: pts.root.distanceTo(c), headClear: true, ikClear: true });
       if (hits.length) this.noteDeathHit(null, a, "C4", C4_BLAST.damage, "torso", pts.root, c, true);
       for (const h of hits) {
@@ -1603,6 +1621,7 @@ export class Game implements BotHost {
       plantHeld: ok && c4InHand && this.input.button(0), defuseHeld: ok && keyHeld(this.input, "action"),
       hasC4: this.me.team === b.attackers,
     };
+    this.gmInstantBomb(b, inp);
     const before = b.action;
     b.update(dt, inp);
     this.bombHints(b, inp, dt);
@@ -1872,7 +1891,7 @@ export class Game implements BotHost {
     this.hud.dispose();
     this.nameTags.dispose();
     this.gmChams.dispose(); this.gmEsp?.dispose(); this.gmEsp = null;
-    resetGmCheats(); setGmGate(() => false); gmHooks.aimDir = null;
+    resetGmCheats(); setGmGate(() => false); gmHooks.aimDir = null; gmDetector.reset(); gmDetector.onAlert = null; gmDetector.enabled = false;
     document.getElementById("pbhud")?.remove();
     this.onMatchEnd = null;
     this.unsubSettings?.();
@@ -1899,6 +1918,7 @@ export class Game implements BotHost {
       if (!gmActive()?.noRecoil) this.player.addRecoil(e.recoilPitch, e.recoilYaw);
       // WeaponGrenade::Throw 0x62ebb3: the thrower's own "Granada!" (AUTO 1: voice only) + radio 0x1f to the team
       if (e.thrown) this.sendRadio(radioId(3, 1));
+      if (e.thrown && gmActive()?.infGrenade) this.gmGrenadeRefill = this.time + 0.8; // GM infinite grenade: refill after the throw is fully out
       this.shadowVisual.fire();
     });
     this.weapons.onHit((e) => {
@@ -1953,6 +1973,7 @@ export class Game implements BotHost {
           const db = this.pbWeapons()?.db;
           const def = (ra.weaponId && db?.def(ra.weaponId)) || (db && db.find(ra.weaponName) && db.def(db.find(ra.weaponName)!.id));
           if (!def) return;
+          gmDetector.fire(ra.id, this.time, (def as { fireDelay?: number }).fireDelay ?? 0);
           const muzzle = ra.muzzle(tMuzzle);
           this.pbWeapons()?.audio.fireAt(def, muzzle, ra.id, { silencer: ra.silencerOn, zoom: ra.aiming });
           // flash + tracer + impact from the replicated aim (eye ray; the shot itself is the shooter's own client). The ray takes
@@ -1990,6 +2011,7 @@ export class Game implements BotHost {
       if (left) this.hud.notice(left.name, tOr("STBL_IDX_GAME_BYE_PLAYER", " He left the fight.")); // ProcessGameContext 0x768fa5
       this.remotes.get(id)?.dispose();
       this.remotes.delete(id);
+      gmDetector.remove(id); this.gmDetDir.delete(id);
       this.match.removeActor(id);
       this.hitColliders.remove(id);
       // 1v1 (and any match with no bots): the opponent quitting leaves no enemy left, so end the
@@ -2002,6 +2024,7 @@ export class Game implements BotHost {
       }
     });
     this.net.onRemoteHit((e) => {
+      { const att = this.actorById(e.attackerId); if (att?.kind === "remote" && !e.preScaled) gmDetector.hit(att.id, att.name, att.team, e.baseDamage, this.pbWeapons()?.db.find(e.weapon)?.damage ?? 0, this.time); }
       // a remote player's hit on a bot WE host: the bot is ours, so its hp is ours to take
       const bot = this.bots.find((b) => b.id === e.victimId);
       if (bot) {
@@ -2260,9 +2283,15 @@ export class Game implements BotHost {
     }
     const gmT = canShoot ? gmActive() : null;
     const trig = !!gmT?.trigger && this.gmTriggerOn(gmT);
+    // GM burst ammo: sniper / shotgun fire every frame while LMB is held (the weapon's own fire delay still paces it)
+    const fam = this.weapons.getState().family as string | undefined;
+    const burstOn = !!gmT?.burstAmmo && inp.button(0) && (fam === "SR" || fam === "SG" || fam === "SHOTGUN");
+    // semi-auto / pump / bolt weapons only shoot on a fresh press: while LMB is held, release and re-press every other frame
+    this.gmBurstFlip = burstOn ? !this.gmBurstFlip : false;
+    const burstPulse = burstOn && this.gmBurstFlip;
     const wi: WeaponInput = {
-      fire: canShoot && (inp.button(0) || trig),
-      firePressed: canShoot && (inp.buttonPressed(0) || trig),
+      fire: canShoot && ((inp.button(0) && !(burstOn && !this.gmBurstFlip)) || trig || burstPulse),
+      firePressed: canShoot && (inp.buttonPressed(0) || trig || burstPulse),
       aim: this.localAiming,
       cancelZoom: this.match.phase === "ended" || this.finalOn,
       reload: canShoot && pressed(inp, "reload"),
@@ -2306,6 +2335,8 @@ export class Game implements BotHost {
     if (ws.reloading && !this.wasReloading) this.shadowVisual.reload();
     this.wasReloading = ws.reloading;
     const ready = !!this.pbWeapons()?.isThrowReady();
+    // GM infinite grenade: never touch the weapon while the pin is out (a refill then cancelled the throw); top up afterwards
+    if (this.gmGrenadeRefill > 0 && !ready && this.time >= this.gmGrenadeRefill) { this.gmGrenadeRefill = 0; if (gmActive()?.infGrenade) this.pbWeapons()?.refill(); }
     if (ready && !this.wasThrowReady) this.shadowVisual.throwReady(); // own shadow: the pin-out pose too
     this.wasThrowReady = ready;
 
@@ -2475,7 +2506,10 @@ export class Game implements BotHost {
         up: inp.key("Space"), down: inp.key("ControlLeft") || inp.key("ControlRight"),
       }, gm.flySpeed, dt);
     }
+    // teleportFeet resets the look pitch (it is a respawn helper): keep it, or the crosshair can never be aimed up / down while flying
+    const keepPitch = this.player.pitch;
     this.player.teleportFeet(this.gmFlyPos, this.player.yaw);
+    (this.player as unknown as { pitch: number }).pitch = keepPitch;
     this.gmNoFallUntil = this.time + 1.5;
   }
 
@@ -2487,25 +2521,32 @@ export class Game implements BotHost {
   }
 
   private gmTmp = new THREE.Vector3();
+  private gmBody = new THREE.Vector3();
   private gmDir = new THREE.Vector3();
   private gmBest = new THREE.Vector3();
   private gmFwd = new THREE.Vector3();
 
-  /** direction from `o` to the head of the enemy closest to the crosshair inside the aim cone (null = none) */
+  /** direction from `o` to the aimed body part (gm.aimBone) of the best enemy inside the aim cone (gm.aimPriority); null = none */
   private gmAimDir(o: THREE.Vector3, fwd: THREE.Vector3, gm: GmCheatState): THREE.Vector3 | null {
-    let best: THREE.Vector3 | null = null, bestDot = Math.cos(THREE.MathUtils.degToRad(gm.aimFov));
+    let best: THREE.Vector3 | null = null, bestKey = Infinity;
+    const cosMax = Math.cos(THREE.MathUtils.degToRad(gm.aimFov));
+    const k = gm.aimBone === "head" ? 1 : gm.aimBone === "legs" ? 0.3 : 0.72; // fraction of the way from the feet to the eye
     for (const a of this.actors()) {
       if (a === this.me || !a.alive || a.team === this.me.team) continue;
-      const d = this.gmDir.copy(a.eye(this.gmTmp)).sub(o), dist = d.length();
+      const feet = a.feet(this.gmBody), eye = a.eye(this.gmTmp);
+      const pt = this.gmBody.copy(feet).lerp(eye, k);
+      if (gm.aimBone === "head") pt.y += 0.05;
+      const d = this.gmDir.copy(pt).sub(o), dist = d.length();
       if (dist < 0.1) continue;
       d.divideScalar(dist);
       const dot = d.dot(fwd);
-      if (dot < bestDot) continue;
+      if (dot < cosMax) continue;
       if (gm.aimVisible) {
         const wh = this.world.castRay(new this.R.Ray({ x: o.x, y: o.y, z: o.z }, { x: d.x, y: d.y, z: d.z }), dist, true, undefined, WORLD_ONLY_QUERY);
         if (wh && wh.timeOfImpact < dist - 0.3) continue; // wall in between
       }
-      bestDot = dot; best = this.gmBest.copy(d);
+      const key = gm.aimPriority === "distance" ? dist : gm.aimPriority === "hp" ? a.hp + dist * 1e-4 : -dot;
+      if (key < bestKey) { bestKey = key; best = this.gmBest.copy(d); }
     }
     return best;
   }
@@ -2569,10 +2610,84 @@ export class Game implements BotHost {
       if (inp.keyPressed(GM_HOTKEYS.noclip)) gmCheats.noclip = !gmCheats.noclip;
     }
     const others = this.gmEspList; others.length = 0;
-    if (gm && (gm.wallhack || gm.esp || gm.radar)) for (const a of this.actors()) if (a !== this.me && a.alive) others.push(a);
+    if (gm && (gm.wallhack || gm.esp || gm.radar || gm.detector)) for (const a of this.actors()) if (a !== this.me && a.alive) others.push(a);
     this.gmChams.update(this.scene, dt, gm?.wallhack ? others.map((a) => ({ actor: a, color: a.team !== this.me.team ? 0xff3b3b : 0x3b9bff })) : [], !!gm?.wallhack);
-    if (gm && (gm.esp || gm.radar)) (this.gmEsp ??= new GmEsp()).update(this.camera, this.me.team, this.me.feet(this._w), others, gm);
+    if (gm && (gm.esp || gm.radar || gm.silentAim || gm.detector)) (this.gmEsp ??= new GmEsp()).update(this.camera, this.me.team, this.me.feet(this._w), others, gm);
     else if (this.gmEsp) { this.gmEsp.dispose(); this.gmEsp = null; }
+    this.updateDetector(dt, gm);
+  }
+
+  /** instant plant / defuse: the hold is skipped as soon as the normal conditions (C4 in hand + inside a site / near the planted bomb) are met */
+  private gmInstantBomb(b: BombMode, inp: BombInput): void {
+    if (!gmActive()?.instantBomb || !inp.alive || this.time < this.gmBombCool) return;
+    if (inp.plantHeld && inp.hasC4 && b.state === "idle" && b.siteAt(inp.pos) >= 0) {
+      let site: { area: number; pos: BombVec3 } | null = null, bd = Infinity;
+      for (const s of this.bombSites) { const d = Math.hypot(s.pos[0] - inp.pos[0], s.pos[2] - inp.pos[2]); if (d < bd) { bd = d; site = s; } }
+      if (!site) return;
+      this.gmBombCool = this.time + 1;
+      if (this.bombRoom) this.bombRoom.bombInstall(site.area, site.pos);
+      else this.onBombPlanted(site.area, site.pos, true);
+    } else if (inp.defuseHeld && b.canDefuse(inp)) {
+      this.gmBombCool = this.time + 1;
+      if (this.bombRoom) this.bombRoom.bombUninstall();
+      else this.onBombDefused();
+    }
+  }
+
+  /** height of the ground under a point (m), 8 = none within reach */
+  private groundGap(x: number, y: number, z: number): number {
+    const hit = this.world.castRay(new this.R.Ray({ x, y: y + 0.2, z }, { x: 0, y: -1, z: 0 }), 8, true, undefined, WORLD_ONLY_QUERY);
+    return hit ? hit.timeOfImpact - 0.2 : 8;
+  }
+
+  /** cheat detector: feeds gmDetector with the remote players (position / view / wall tracking); shots, hits and kills are fed from their own events */
+  private updateDetector(dt: number, gm: GmCheatState | null): void {
+    gmDetector.enabled = !!gm?.detector && this.match.live; // no flags in the countdown / round end
+    gmDetector.sens = gm?.detectSens ?? 1;
+    if (!gm?.detector) return;
+    const now = this.time, a = this.gmDetA, b = this.gmDetB, c = this.gmDetC;
+    for (const r of this.remotes.values()) {
+      const f = r.feet(a), d = r.viewDir(b);
+      gmDetector.sample(now, { id: r.id, name: r.name, team: r.team, alive: r.alive, x: f.x, y: f.y, z: f.z, dx: d.x, dy: d.y, dz: d.z }, () => this.groundGap(f.x, f.y, f.z));
+    }
+    gmDetector.settle(now, (id) => { const r = this.remotes.get(id); return r ? { hp: r.hp, alive: r.alive } : null; });
+    this.gmDetTrackT -= dt;
+    if (this.gmDetTrackT > 0) return;
+    this.gmDetTrackT = 0.1;
+    const el = Math.max(0.05, now - this.gmDetTickT);
+    this.gmDetTickT = now;
+    const all = [...this.actors()];
+    // horizontal speed of every actor over this tick: a crosshair parked on a wall (cover fire, pre-aim) never follows a moving target
+    for (const e of all) {
+      const f = e.feet(c), p = this.gmDetPrev.get(e.id);
+      this.gmDetSpeed.set(e.id, p ? Math.hypot(f.x - p.x, f.z - p.z) / el : 0);
+      this.gmDetPrev.set(e.id, { x: f.x, z: f.z });
+    }
+    for (const r of this.remotes.values()) {
+      let seen = false;
+      const dir = r.viewDir(b);
+      const prev = this.gmDetDir.get(r.id);
+      const turn = prev ? Math.acos(Math.max(-1, Math.min(1, prev.dot(dir)))) : 0; // his aim is actually moving
+      if (prev) prev.copy(dir); else this.gmDetDir.set(r.id, dir.clone());
+      if (r.alive && turn > 0.01) {
+        const eye = r.eye(a);
+        for (const e of all) {
+          if (e === r || !e.alive || e.team === r.team || (this.gmDetSpeed.get(e.id) ?? 0) < 2.5) continue;
+          const t = e.feet(c);
+          let blocked = 0, locked = false;
+          for (const h of [1.2, 1.65]) { // chest and head must BOTH be behind the world, else it is a corner / edge
+            const dx = t.x - eye.x, dy = t.y + h - eye.y, dz = t.z - eye.z, dist = Math.hypot(dx, dy, dz);
+            if (dist < 8) { blocked = -9; break; }
+            if (h === 1.2) locked = (dx * dir.x + dy * dir.y + dz * dir.z) / dist >= 0.9997; // within ~1.4 degrees
+            if (!locked) break;
+            const wall = this.world.castRay(new this.R.Ray({ x: eye.x, y: eye.y, z: eye.z }, { x: dx / dist, y: dy / dist, z: dz / dist }), dist, true, undefined, WORLD_ONLY_QUERY);
+            if (wall && wall.timeOfImpact < dist - 0.5) blocked++;
+          }
+          if (locked && blocked === 2) { seen = true; break; }
+        }
+      }
+      gmDetector.track(r.id, el, seen);
+    }
   }
 
   private isGM(): boolean {

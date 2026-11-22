@@ -3,8 +3,9 @@
 //  - RADAR: a round radar (top-right) with every living actor around you, rotated to your view
 import * as THREE from "three";
 import type { GmCheatState } from "./gmCheats.ts";
+import { gmDetector } from "./gmDetector.ts";
 
-export interface EspActor { name: string; team: number; hp: number; maxHp: number; feet(out: THREE.Vector3): THREE.Vector3; eye(out: THREE.Vector3): THREE.Vector3 }
+export interface EspActor { id: string; name: string; team: number; hp: number; maxHp: number; feet(out: THREE.Vector3): THREE.Vector3; eye(out: THREE.Vector3): THREE.Vector3 }
 
 const RADAR_R = 80, RADAR_RANGE = 60; // px, metres
 
@@ -35,6 +36,48 @@ export class GmEsp {
     cam.updateMatrixWorld();
     if (o.esp) this.drawEsp(cam, myTeam, myPos, actors, o, W, H);
     if (o.radar) this.drawRadar(cam, myTeam, myPos, actors, W);
+    if (o.detector) this.drawDetector(cam, actors, o, W, H);
+    if (o.silentAim) this.drawAimCircle(cam, o, W, H);
+  }
+
+  /** cheat detector: small text right above the head of every suspicious player (score + reasons), colour by level */
+  private drawDetector(cam: THREE.Camera, actors: EspActor[], o: GmCheatState, W: number, H: number): void {
+    const rows = gmDetector.list();
+    if (!rows.length) return;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const c = this.ctx;
+    c.save();
+    c.font = "bold 11px Rajdhani, sans-serif"; c.textAlign = "center"; c.lineWidth = 3; c.lineJoin = "round";
+    for (const a of actors) {
+      const r = byId.get(a.id);
+      if (!r) continue;
+      const head = a.eye(this.b); head.y += 0.2;
+      const h = head.clone().project(cam);
+      if (h.z > 1) continue;
+      const x = (h.x * 0.5 + 0.5) * W, y = (-h.y * 0.5 + 0.5) * H - (o.esp && o.espName ? 18 : 4);
+      const col = r.level === 3 ? "#ff4d4d" : r.level === 2 ? "#ff8c00" : "#e6c84a";
+      const top = [...r.flags].sort((p, q) => q.n - p.n);
+      const t = `${r.level === 3 ? "!!" : "!"} ${r.score}  ${top.slice(0, 3).map((f) => `${f.label} x${f.n}`).join(" · ")}${top.length > 3 ? ` +${top.length - 3}` : ""}`;
+      c.globalAlpha = r.age > 60 ? 0.55 : 1; // an old flag fades
+      c.strokeStyle = "#000"; c.fillStyle = col;
+      c.strokeText(t, x, y); c.fillText(t, x, y);
+    }
+    c.globalAlpha = 1;
+    c.restore();
+  }
+
+  /** silent-aim range: circle around the crosshair = the cone (half-angle aimFov) projected on screen */
+  private drawAimCircle(cam: THREE.Camera, o: GmCheatState, W: number, H: number): void {
+    const fov = (cam as THREE.PerspectiveCamera).fov;
+    if (!fov) return;
+    const half = Math.min(o.aimFov, 89) * Math.PI / 180;
+    const r = Math.tan(half) / Math.tan(fov * Math.PI / 360) * (H / 2);
+    const c = this.ctx;
+    c.save();
+    c.beginPath(); c.arc(W / 2, H / 2, r, 0, Math.PI * 2);
+    c.fillStyle = "rgba(255,140,0,.05)"; c.fill();
+    c.strokeStyle = "rgba(255,140,0,.85)"; c.lineWidth = 1.5; c.setLineDash([6, 4]); c.stroke();
+    c.restore();
   }
 
   private drawRadar(cam: THREE.Camera, myTeam: number, myPos: THREE.Vector3, actors: EspActor[], W: number): void {

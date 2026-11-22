@@ -10,7 +10,7 @@ export type GmToggleKey =
   | "wallhack" | "esp" | "god" 
   | "infAmmo" | "noReload" | "noRecoil" | "noSpread" | "rapidFire"
   | "noclip"
-  | "wallbang" | "autoHead" | "silentAim" | "trigger" | "radar" | "noFall";
+  | "wallbang" | "burstAmmo" | "infGrenade" | "instantBomb" | "detector" | "autoHead" | "silentAim" | "trigger" | "radar" | "noFall";
 export type GmCheatKey = GmToggleKey; // kept for older imports
 
 export interface GmCheatState extends Record<GmToggleKey, boolean> {
@@ -22,6 +22,10 @@ export interface GmCheatState extends Record<GmToggleKey, boolean> {
   flySpeed: number;
   /** silent-aim cone, degrees; aimVisible = only targets with a clear line of sight */
   aimFov: number; aimVisible: boolean;
+  /** silent-aim target choice: closest to the crosshair / nearest / lowest hp, and the body part aimed at */
+  aimPriority: "crosshair" | "distance" | "hp"; aimBone: "head" | "chest" | "legs";
+  /** cheat detector: popup alert and score multiplier */
+  detectAlert: boolean; detectSens: number;
 }
 
 const DEFAULTS: GmCheatState = {
@@ -31,27 +35,34 @@ const DEFAULTS: GmCheatState = {
   speedMult: 1, jumpMult: 1, damageMult: 1, timeScale: 1, rapidFireMult: 3,
   flySpeed: 12,
   aimFov: 15, aimVisible: true,
-  wallbang: false, autoHead: false, silentAim: false, trigger: false, radar: false, noFall: false,
+  aimPriority: "crosshair", aimBone: "chest",
+  detectAlert: false, detectSens: 1,
+  infGrenade: false, instantBomb: false, detector: true,
+  wallbang: false, burstAmmo: false, autoHead: false, silentAim: false, trigger: false, radar: false, noFall: false,
 };
 
-/** live state; everything off at load and after resetGmCheats() */
+/** live state; everything off at load (the passive cheat detector is on) and after resetGmCheats() */
 export const gmCheats: GmCheatState = { ...DEFAULTS };
 
 export const GM_CHEAT_LABELS: Record<GmToggleKey, string> = {
-  wallhack: "Wallhack / Chams (models through walls)",
-  esp: "ESP (box, snaplines, nick + distance, HP)",
-  god: "God mode (no damage taken)",
+  wallhack: "Wallhack/Chams",
+  esp: "ESP (Box, Name, HP)",
+  god: "God mode",
   infAmmo: "Infinite ammo",
-  noReload: "No reload (instant)",
+  noReload: "No reload",
   noRecoil: "No recoil",
-  noSpread: "No spread (100% accuracy)",
+  noSpread: "No spread",
   rapidFire: "Rapid fire",
-  noclip: "Noclip / fly (W A S D, Space up, Ctrl down)",
-  wallbang: "Wallbang (bullets pass through walls)",
-  autoHead: "Auto headshot (every hit counts as head)",
-  silentAim: "Silent aim (bullets go to the nearest enemy head)",
-  trigger: "Triggerbot (fires when an enemy is on target)",
-  radar: "Radar hack (all enemies on the minimap)",
+  noclip: "Noclip/Fly",
+  wallbang: "Wallbang",
+  burstAmmo: "Burst ammo (Sniper/Shotgun)",
+  infGrenade: "Infinite grenade",
+  instantBomb: "Instant plant/defuse",
+  detector: "Cheat detector",
+  autoHead: "Auto headshot",
+  silentAim: "Silent aim",
+  trigger: "Triggerbot",
+  radar: "Radar hack",
   noFall: "No fall damage",
 };
 

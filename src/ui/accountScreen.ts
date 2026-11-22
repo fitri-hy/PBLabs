@@ -7,287 +7,516 @@ export interface AccountSession {
 }
 
 const STYLE_ID = "pb-modern-account-screen-style";
-const LOGIN_ART = "/assets/ui/cross/brand/login-bg.jpg"; // Gambar background original Point Blank
+const LOGIN_ART = "/assets/ui/cross/brand/login-bg.jpg";
 
 function ensureStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-    @import url('https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Rajdhani:wght@500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap');
 
-    .pb-modern-overlay {
+    .pb-acc {
+      --pb-bg: #0c1117;
+      --pb-panel: #121922;
+      --pb-field: #0c1117;
+      --pb-line: #243040;
+      --pb-line-strong: #3a4a60;
+      --pb-text: #e8edf3;
+      --pb-muted: #8a99ad;
+      --pb-accent: #4cc3ff;
+      --pb-accent-hover: #7ad3ff;
+      --pb-on-accent: #06121c;
+      --pb-danger: #ff6b6b;
+
       position: fixed;
       inset: 0;
       z-index: 10000;
-      background: #000 url(${LOGIN_ART}) no-repeat center center;
+      display: flex;
+      background: var(--pb-bg);
+      color: var(--pb-text);
+      font-family: 'Barlow', system-ui, sans-serif;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      box-sizing: border-box;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+    .pb-acc *, .pb-acc *::before, .pb-acc *::after { box-sizing: border-box; }
+    .pb-acc [hidden] { display: none !important; }
+
+    /* Background art: desaturated and darkened, no glow */
+    .pb-acc__bg {
+      position: absolute;
+      inset: 0;
+      background: #0c1117 url(${LOGIN_ART}) no-repeat 30% center;
       background-size: cover;
+      filter: grayscale(0.7) brightness(0.5) contrast(1.1);
+      transform: scale(1.02);
+    }
+    .pb-acc__shade {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(12,17,23,0.35) 0%, rgba(12,17,23,0.75) 55%, rgba(12,17,23,0.96) 100%),
+        linear-gradient(0deg, rgba(12,17,23,0.85) 0%, rgba(12,17,23,0) 40%);
+    }
+
+    /* Hero (left) */
+    .pb-acc__hero {
+      position: relative;
+      flex: 1 1 auto;
+      display: none;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 56px 64px;
+      min-width: 0;
+    }
+    .pb-acc__hero { overflow: hidden; }
+
+    /* Wordmark: solid accent tile + heavy condensed type, slightly italicised */
+    .pb-acc__wordmark {
+      display: flex;
+      align-items: stretch;
+      margin: 0;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 800;
+      font-size: clamp(64px, 9vw, 176px);
+      line-height: 0.9;
+      letter-spacing: -0.015em;
+      text-transform: uppercase;
+      color: var(--pb-text);
+      transform: skewX(-7deg);
+      transform-origin: left bottom;
+      white-space: nowrap;
+    }
+    .pb-acc__wm-pb {
+      padding: 0.05em 0.2em 0.02em 0.1em;
+      background: var(--pb-accent);
+      color: var(--pb-on-accent);
+      clip-path: polygon(0 0, 100% 0, calc(100% - 0.14em) 100%, 0 100%);
+    }
+    .pb-acc__wm-labs {
+      padding: 0.05em 0 0.02em 0.14em;
+    }
+    .pb-acc__rule {
+      position: relative;
+      width: min(100%, 420px);
+      height: 1px;
+      margin-top: 26px;
+      background: var(--pb-line-strong);
+    }
+    .pb-acc__rule::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: -1px;
+      width: 72px;
+      height: 3px;
+      background: var(--pb-accent);
+    }
+    .pb-acc__tagline {
+      margin: 20px 0 0;
+      max-width: 420px;
+      font-size: 18px;
+      line-height: 1.5;
+      color: var(--pb-muted);
+    }
+
+    /* Panel (right) */
+    .pb-acc__panel {
+      position: relative;
+      width: 100%;
+      flex: 0 0 auto;
+      min-height: 100%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding:
+        max(32px, env(safe-area-inset-top))
+        max(24px, env(safe-area-inset-right))
+        max(32px, env(safe-area-inset-bottom))
+        max(24px, env(safe-area-inset-left));
+      background: var(--pb-panel);
+      border-left: 1px solid var(--pb-line);
+      animation: pb-acc-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    @keyframes pb-acc-in {
+      from { opacity: 0; transform: translateX(24px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .pb-acc__panel > * { width: 100%; max-width: 420px; flex: 0 0 auto; }
+    .pb-acc__brand {
       display: flex;
       align-items: center;
-      justify-content: center;
-      font-family: 'Rajdhani', sans-serif;
-      overflow-y: auto;
-      padding: 12px;
-      box-sizing: border-box;
+      gap: 8px;
+      margin-top: auto;
+      margin-bottom: 32px;
+    }
+    .pb-acc__brand-mark {
+      padding: 1px 9px 1px 6px;
+      background: var(--pb-accent);
+      color: var(--pb-on-accent);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 800;
+      font-size: 24px;
+      line-height: 1.15;
+      text-transform: uppercase;
+      clip-path: polygon(0 0, 100% 0, calc(100% - 5px) 100%, 0 100%);
+    }
+    .pb-acc__brand-name {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 800;
+      font-size: 26px;
+      letter-spacing: 0.01em;
+      text-transform: uppercase;
+    }
+    .pb-acc__brand-tag {
+      font-size: 13px;
+      color: var(--pb-muted);
     }
 
-    /* Dark vignette overlay */
-    .pb-modern-overlay::before {
+    /* Mode switch */
+    .pb-acc__tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-bottom: 1px solid var(--pb-line);
+      margin-bottom: 28px;
+    }
+    .pb-acc__tab {
+      position: relative;
+      appearance: none;
+      background: none;
+      border: 0;
+      padding: 0 0 14px;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 600;
+      font-size: 22px;
+      letter-spacing: 0.02em;
+      color: var(--pb-muted);
+      cursor: pointer;
+      text-align: left;
+      transition: color 0.15s ease;
+    }
+    .pb-acc__tab:hover { color: var(--pb-text); }
+    .pb-acc__tab[aria-selected="true"] { color: var(--pb-text); }
+    .pb-acc__tab[aria-selected="true"]::after {
       content: '';
-      position: fixed;
-      inset: 0;
-      background: radial-gradient(circle, rgba(8, 10, 14, 0.4) 0%, rgba(5, 7, 10, 0.88) 100%);
-      pointer-events: none;
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -1px;
+      height: 3px;
+      background: var(--pb-accent);
     }
 
-    /* Main Container Card (Compact & Modern Tactical Glassmorphism) */
-    .pb-auth-card {
-      position: relative;
-      width: 100%;
-      max-width: 380px; /* Diperkecil agar lebih compact */
-      background: rgba(13, 17, 23, 0.92);
-      border: 1px solid rgba(255, 140, 0, 0.4);
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9), inset 0 0 20px rgba(255, 140, 0, 0.08);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      padding: 30px 25px; /* Padding lebih ramping */
-      box-sizing: border-box;
-      clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
-      animation: cardEntrance 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-      margin: auto;
-    }
-
-    @keyframes cardEntrance {
-      from { opacity: 0; transform: translateY(15px) scale(0.98); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
-    }
-
-    /* Header Brand */
-    .pb-auth-header {
-      text-align: center;
-      margin-bottom: 22px;
-    }
-
-    .pb-auth-title {
-      font-family: 'Teko', sans-serif;
-      font-size: 32px; /* Ukuran judul disesuaikan */
+    .pb-acc__heading {
+      font-family: 'Barlow Condensed', sans-serif;
       font-weight: 700;
-      color: #ffffff;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      margin: 0;
+      font-size: 40px;
       line-height: 1;
-      text-shadow: 0 2px 10px rgba(255, 140, 0, 0.5);
+      margin: 0 0 6px;
+    }
+    .pb-acc__sub {
+      margin: 0 0 26px;
+      font-size: 15px;
+      color: var(--pb-muted);
     }
 
-    .pb-auth-subtitle {
-      font-size: 11px;
-      color: #8b9bb4;
-      letter-spacing: 2.5px;
-      text-transform: uppercase;
-      margin-top: 4px;
-    }
-
-    /* Form Groups */
-    .pb-auth-group {
-      margin-bottom: 15px; /* Jarak antar input lebih rapat */
-      position: relative;
-    }
-
-    .pb-auth-label {
+    /* Fields */
+    .pb-acc__group { margin-bottom: 16px; }
+    .pb-acc__label {
       display: block;
-      font-size: 11px;
-      font-weight: 700;
-      color: #a0aec0;
-      letter-spacing: 1.2px;
-      text-transform: uppercase;
-      margin-bottom: 6px;
+      margin-bottom: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--pb-muted);
     }
-
-    .pb-auth-input-wrapper {
-      position: relative;
-      background: rgba(0, 0, 0, 0.5);
-      border: 1px solid #2a3447;
-      transition: all 0.3s ease;
+    .pb-acc__field {
+      display: flex;
+      align-items: center;
+      height: 48px;
+      background: var(--pb-field);
+      border: 1px solid var(--pb-line);
+      border-radius: 2px;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
     }
-
-    .pb-auth-input-wrapper:focus-within {
-      border-color: #ff8c00;
-      box-shadow: 0 0 8px rgba(255, 140, 0, 0.3);
+    .pb-acc__field:hover { border-color: var(--pb-line-strong); }
+    .pb-acc__field:focus-within {
+      border-color: var(--pb-accent);
+      background: #0e151d;
     }
+    .pb-acc__icon {
+      flex: 0 0 auto;
+      width: 44px;
+      display: grid;
+      place-items: center;
+      color: var(--pb-muted);
+    }
+    .pb-acc__field:focus-within .pb-acc__icon { color: var(--pb-accent); }
+    .pb-acc__icon svg { width: 18px; height: 18px; }
 
     .pb-account-input {
-      width: 100%;
-      box-sizing: border-box;
-      height: 40px; /* Tinggi input lebih compact */
-      padding: 0 12px;
+      flex: 1 1 auto;
+      min-width: 0;
+      height: 100%;
+      padding: 0 14px 0 0;
       background: transparent;
-      border: none;
+      border: 0;
       outline: none;
-      color: #ffffff;
-      font-family: 'Rajdhani', sans-serif;
-      font-size: 16px; /* Wajib 16px agar tidak auto-zoom di HP */
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      caret-color: #ff8c00;
+      color: var(--pb-text);
+      font-family: 'Barlow', sans-serif;
+      font-size: 16px; /* 16px agar tidak auto-zoom di HP */
+      font-weight: 500;
+      caret-color: var(--pb-accent);
     }
-
+    .pb-account-input::placeholder { color: #55657a; }
     .pb-account-input:-webkit-autofill,
     .pb-account-input:-webkit-autofill:hover,
     .pb-account-input:-webkit-autofill:focus {
-      -webkit-text-fill-color: #fff !important;
-      -webkit-box-shadow: 0 0 0px 1000px #0d1117 inset !important;
+      -webkit-text-fill-color: #e8edf3 !important;
+      -webkit-box-shadow: 0 0 0 1000px #0c1117 inset !important;
       transition: background-color 5000s ease-in-out 0s;
     }
 
-    /* Action Buttons */
-    .pb-auth-actions {
-      margin-top: 22px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+    .pb-acc__peek {
+      flex: 0 0 auto;
+      width: 44px;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      background: none;
+      border: 0;
+      color: var(--pb-muted);
+      cursor: pointer;
+    }
+    .pb-acc__peek:hover { color: var(--pb-text); }
+    .pb-acc__peek svg { width: 18px; height: 18px; }
+
+    .pb-acc__hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #66768b;
     }
 
+    /* Submit */
     .pb-account-btn {
       width: 100%;
-      height: 42px; /* Tinggi tombol lebih compact */
-      border: none;
-      font-family: 'Teko', sans-serif;
-      font-size: 20px;
-      font-weight: 600;
-      letter-spacing: 1.2px;
+      height: 52px;
+      margin-top: 10px;
+      border: 0;
+      border-radius: 2px;
+      background: var(--pb-accent);
+      color: var(--pb-on-accent);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-weight: 700;
+      font-size: 22px;
+      letter-spacing: 0.04em;
       text-transform: uppercase;
       cursor: pointer;
-      transition: all 0.2s ease;
-      position: relative;
-      overflow: hidden;
+      transition: background-color 0.15s ease, transform 0.1s ease;
     }
+    .pb-account-btn:hover:not(:disabled) { background: var(--pb-accent-hover); }
+    .pb-account-btn:active:not(:disabled) { transform: translateY(1px); }
+    .pb-account-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-    .pb-btn-primary {
-      background: linear-gradient(135deg, #ff8c00 0%, #e07000 100%);
-      color: #0c0f16;
-      box-shadow: 0 4px 12px rgba(255, 140, 0, 0.35);
-      clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
-    }
-
-    .pb-btn-primary:hover:not(:disabled) {
-      background: linear-gradient(135deg, #ffa333, #f08000);
-      box-shadow: 0 5px 16px rgba(255, 140, 0, 0.55);
-      transform: translateY(-1px);
-    }
-
-    .pb-btn-secondary {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid #2a3447;
-      color: #a0aec0;
-    }
-
-    .pb-btn-secondary:hover:not(:disabled) {
-      background: rgba(255, 255, 255, 0.09);
-      border-color: #4a5568;
-      color: #ffffff;
-    }
-
-    .pb-account-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
-    /* Error Message Box */
     .pb-account-error {
-      margin-top: 12px;
-      padding: 8px 10px;
-      background: rgba(255, 75, 75, 0.12);
-      border-left: 3px solid #ff4b4b;
-      color: #ff9d9d;
-      font-size: 12px;
-      font-weight: 600;
       display: none;
-      animation: shake 0.3s ease-in-out;
+      margin-top: 16px;
+      padding: 11px 14px;
+      background: rgba(255, 107, 107, 0.1);
+      border: 1px solid rgba(255, 107, 107, 0.35);
+      border-left: 3px solid var(--pb-danger);
+      border-radius: 2px;
+      color: #ffb3b3;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .pb-account-error.visible { display: block; }
+
+	.pb-acc__foot {
+	  margin-top: 32px;
+	  margin-bottom: auto;
+	  padding-top: 18px;
+	  border-top: 1px solid var(--pb-line);
+	  font-size: 12px;
+	  color: #98a6b8;
+	  text-align: center;
+	}
+
+    .pb-acc :focus-visible {
+      outline: 2px solid var(--pb-accent);
+      outline-offset: 2px;
+    }
+    .pb-acc__field :focus-visible { outline: none; }
+
+    /* Touch devices: bigger tap targets */
+    @media (pointer: coarse) {
+      .pb-acc__tab { min-height: 44px; padding-bottom: 14px; }
+      .pb-acc__peek { width: 48px; }
+      .pb-acc__field { height: 50px; }
     }
 
-    .pb-account-error.visible {
-      display: block;
-    }
-
-    @keyframes shake {
-      0%, 100% { transform: translateX(0); }
-      25% { transform: translateX(-4px); }
-      75% { transform: translateX(4px); }
-    }
-
-    /* Penyesuaian Ekstra untuk Layar Sangat Kecil / HP Portrait */
+    /* Small phones, portrait */
     @media (max-width: 480px) {
-      .pb-modern-overlay {
-        padding: 8px;
+      .pb-acc__panel {
+        justify-content: flex-start;
+        padding:
+          max(24px, env(safe-area-inset-top))
+          max(18px, env(safe-area-inset-right))
+          max(24px, env(safe-area-inset-bottom))
+          max(18px, env(safe-area-inset-left));
       }
-      .pb-auth-card {
-        padding: 20px 16px;
-        max-width: 100%;
+      .pb-acc__brand { margin-bottom: 24px; }
+      .pb-acc__heading { font-size: 34px; }
+      .pb-account-btn { height: 50px; }
+    }
+    @media (max-width: 360px) {
+      .pb-acc__heading { font-size: 30px; }
+      .pb-acc__tab { font-size: 19px; }
+      .pb-acc__sub { font-size: 14px; }
+    }
+
+    /* Tablet landscape and desktop: hero plus angled panel */
+    @media (min-width: 900px) and (min-height: 561px) {
+      .pb-acc__hero { display: flex; }
+      .pb-acc__panel {
+        width: 480px;
+        padding:
+          max(48px, env(safe-area-inset-top))
+          max(56px, env(safe-area-inset-right))
+          max(48px, env(safe-area-inset-bottom))
+          88px;
+        border-left: 0;
+        clip-path: polygon(56px 0, 100% 0, 100% 100%, 0 100%);
       }
-      .pb-auth-title {
-        font-size: 28px;
+    }
+    @media (min-width: 1400px) and (min-height: 561px) {
+      .pb-acc__panel { width: 540px; }
+    }
+
+    /* Phones in landscape and any short window: compact two-column layout */
+    @media (orientation: landscape) and (max-height: 560px) {
+      .pb-acc__hero {
+        display: flex;
+        padding: 20px 28px 20px max(28px, env(safe-area-inset-left));
       }
-      .pb-auth-header {
-        margin-bottom: 16px;
+      .pb-acc__wordmark { font-size: min(26vh, 104px, 11vw); }
+      .pb-acc__tagline { display: none; }
+      .pb-acc__rule { margin-top: 14px; }
+
+      .pb-acc__panel {
+        width: clamp(340px, 48vw, 460px);
+        justify-content: flex-start;
+        padding:
+          max(14px, env(safe-area-inset-top))
+          max(20px, env(safe-area-inset-right))
+          max(14px, env(safe-area-inset-bottom))
+          24px;
+        border-left: 1px solid var(--pb-line);
+        clip-path: none;
       }
-      .pb-auth-group {
-        margin-bottom: 12px;
-      }
-      .pb-account-input {
-        height: 38px;
-      }
-      .pb-account-btn {
-        height: 38px;
-        font-size: 18px;
-      }
+      .pb-acc__brand, .pb-acc__sub, .pb-acc__foot { display: none; }
+      .pb-acc__tabs { margin-top: auto; margin-bottom: 12px; }
+      .pb-acc__tab { font-size: 20px; min-height: 0; padding-bottom: 8px; }
+      .pb-acc__heading { font-size: 28px; margin-bottom: 12px; }
+      .pb-acc__group { margin-bottom: 10px; }
+      .pb-acc__label { margin-bottom: 4px; font-size: 12px; }
+      .pb-acc__field { height: 42px; }
+      .pb-acc__peek { width: 44px; }
+      .pb-account-btn { height: 44px; margin-top: 4px; font-size: 20px; }
+      .pb-account-error { margin-top: 10px; padding: 8px 12px; font-size: 13px; }
+      .pb-acc__panel > :last-child { margin-bottom: auto; }
+    }
+    /* Very narrow landscape: form only */
+    @media (orientation: landscape) and (max-height: 560px) and (max-width: 639px) {
+      .pb-acc__hero { display: none; }
+      .pb-acc__panel { width: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pb-acc__panel { animation: none; }
+      .pb-account-btn, .pb-acc__field { transition: none; }
     }
   `;
   document.head.appendChild(style);
 }
+
+const ICON_USER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
+const ICON_MAIL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="m3.5 6.5 8.5 7 8.5-7"/></svg>`;
+const ICON_LOCK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="1.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>`;
+const ICON_EYE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const ICON_EYE_OFF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A16.6 16.6 0 0 0 2 12s3.5 7 10 7c1.5 0 2.9-.4 4.1-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>`;
 
 export function showAccountScreen(): Promise<AccountSession> {
   ensureStyles();
 
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
-    overlay.className = "pb-modern-overlay";
-    
+    overlay.className = "pb-acc";
+
     overlay.innerHTML = `
-      <div class="pb-auth-card">
-        <div class="pb-auth-header">
-          <h1 class="pb-auth-title" id="pb-auth-main-title">PB LABS</h1>
-          <div class="pb-auth-subtitle" id="pb-auth-sub-title">Enter your operative ID</div>
+      <div class="pb-acc__bg"></div>
+      <div class="pb-acc__shade"></div>
+
+      <section class="pb-acc__hero" aria-hidden="true">
+        <h1 class="pb-acc__wordmark" aria-label="PB Labs"><span class="pb-acc__wm-pb">PB</span><span class="pb-acc__wm-labs">Labs</span></h1>
+        <div class="pb-acc__rule"></div>
+        <p class="pb-acc__tagline">Experience the legendary PBLabs FPS action directly in your browser—no downloads required!</p>
+      </section>
+
+      <main class="pb-acc__panel">
+        <div class="pb-acc__brand">
+          <span class="pb-acc__brand-mark">PB</span>
+          <span class="pb-acc__brand-name">Labs</span>
+          <span class="pb-acc__brand-tag">0.0.4</span>
         </div>
 
-        <div class="pb-auth-group">
-          <label class="pb-auth-label" for="pb-acc-username">Username</label>
-          <div class="pb-auth-input-wrapper">
-            <input class="pb-account-input" id="pb-acc-username" type="text" autocomplete="username" maxlength="16" placeholder="Enter username..." />
+        <div class="pb-acc__tabs" role="tablist" aria-label="Account mode">
+          <button class="pb-acc__tab" id="pb-acc-tab-login" role="tab" type="button" aria-selected="true">Sign in</button>
+          <button class="pb-acc__tab" id="pb-acc-tab-register" role="tab" type="button" aria-selected="false">Create account</button>
+        </div>
+
+        <h2 class="pb-acc__heading" id="pb-auth-main-title">Welcome back</h2>
+        <p class="pb-acc__sub" id="pb-auth-sub-title">Sign in with your username and password.</p>
+
+        <div class="pb-acc__group">
+          <label class="pb-acc__label" for="pb-acc-username">Username</label>
+          <div class="pb-acc__field">
+            <span class="pb-acc__icon">${ICON_USER}</span>
+            <input class="pb-account-input" id="pb-acc-username" type="text" autocomplete="username" maxlength="16" placeholder="Your username" spellcheck="false" autocapitalize="off" />
           </div>
         </div>
 
-        <div class="pb-auth-group" id="pb-acc-email-group" hidden>
-          <label class="pb-auth-label" for="pb-acc-email">Email</label>
-          <div class="pb-auth-input-wrapper">
-            <input class="pb-account-input" id="pb-acc-email" type="email" autocomplete="email" maxlength="255" placeholder="Enter email..." />
+        <div class="pb-acc__group" id="pb-acc-email-group" hidden>
+          <label class="pb-acc__label" for="pb-acc-email">Email</label>
+          <div class="pb-acc__field">
+            <span class="pb-acc__icon">${ICON_MAIL}</span>
+            <input class="pb-account-input" id="pb-acc-email" type="email" autocomplete="email" maxlength="255" placeholder="you@example.com" spellcheck="false" autocapitalize="off" />
           </div>
         </div>
 
-        <div class="pb-auth-group">
-          <label class="pb-auth-label" for="pb-acc-password">Password</label>
-          <div class="pb-auth-input-wrapper">
-            <input class="pb-account-input" id="pb-acc-password" type="password" autocomplete="current-password" maxlength="64" placeholder="••••••••••••" />
+        <div class="pb-acc__group">
+          <label class="pb-acc__label" for="pb-acc-password">Password</label>
+          <div class="pb-acc__field">
+            <span class="pb-acc__icon">${ICON_LOCK}</span>
+            <input class="pb-account-input" id="pb-acc-password" type="password" autocomplete="current-password" maxlength="64" placeholder="At least 6 characters" />
+            <button class="pb-acc__peek" id="pb-acc-peek" type="button" aria-label="Show password">${ICON_EYE}</button>
           </div>
         </div>
 
-        <div class="pb-auth-actions">
-          <button class="pb-account-btn pb-btn-primary" id="pb-acc-submit" type="button">LOGIN</button>
-          <button class="pb-account-btn pb-btn-secondary" id="pb-acc-mode" type="button">CREATE ACCOUNT</button>
-        </div>
+        <button class="pb-account-btn" id="pb-acc-submit" type="button">Sign in</button>
 
-        <div class="pb-account-error" id="pb-acc-error"></div>
-      </div>
+        <div class="pb-account-error" id="pb-acc-error" role="alert"></div>
+
+        <div class="pb-acc__foot">Pull the Trigger, Push Beyond the Limits.</div>
+      </main>
     `;
 
     document.body.appendChild(overlay);
@@ -324,8 +553,10 @@ export function showAccountScreen(): Promise<AccountSession> {
     );
 
     let mode: "login" | "register" = "login";
-    const modeBtn = overlay.querySelector<HTMLButtonElement>("#pb-acc-mode")!;
+    const tabLogin = overlay.querySelector<HTMLButtonElement>("#pb-acc-tab-login")!;
+    const tabRegister = overlay.querySelector<HTMLButtonElement>("#pb-acc-tab-register")!;
     const submitBtn = overlay.querySelector<HTMLButtonElement>("#pb-acc-submit")!;
+    const peekBtn = overlay.querySelector<HTMLButtonElement>("#pb-acc-peek")!;
     const usernameInput = overlay.querySelector<HTMLInputElement>("#pb-acc-username")!;
     const emailGroup = overlay.querySelector<HTMLElement>("#pb-acc-email-group")!;
     const emailInput = overlay.querySelector<HTMLInputElement>("#pb-acc-email")!;
@@ -336,13 +567,17 @@ export function showAccountScreen(): Promise<AccountSession> {
 
     function setMode(next: "login" | "register"): void {
       mode = next;
-      mainTitle.textContent = next === "login" ? "PB LABS" : "CREATE ACCOUNT";
-      subTitle.textContent = next === "login" ? "Enter your operative ID" : "Register new operative credentials";
-      modeBtn.textContent = next === "login" ? "CREATE ACCOUNT" : "BACK TO LOGIN";
-      submitBtn.textContent = next === "login" ? "LOGIN" : "REGISTER";
-      passwordInput.autocomplete = next === "login" ? "current-password" : "new-password";
-      emailGroup.hidden = next === "login";
-      if (next === "login") emailInput.value = "";
+      const isLogin = next === "login";
+      tabLogin.setAttribute("aria-selected", String(isLogin));
+      tabRegister.setAttribute("aria-selected", String(!isLogin));
+      mainTitle.textContent = isLogin ? "Welcome back" : "Create your account";
+      subTitle.textContent = isLogin
+        ? "Sign in with your username and password."
+        : "Pick a username and register to start playing.";
+      submitBtn.textContent = isLogin ? "Sign in" : "Create account";
+      passwordInput.autocomplete = isLogin ? "current-password" : "new-password";
+      emailGroup.hidden = isLogin;
+      if (isLogin) emailInput.value = "";
       hideError();
     }
 
@@ -355,7 +590,15 @@ export function showAccountScreen(): Promise<AccountSession> {
       errorBox.classList.remove("visible");
     }
 
-    modeBtn.addEventListener("click", () => setMode(mode === "login" ? "register" : "login"));
+    tabLogin.addEventListener("click", () => setMode("login"));
+    tabRegister.addEventListener("click", () => setMode("register"));
+
+    peekBtn.addEventListener("click", () => {
+      const showing = passwordInput.type === "text";
+      passwordInput.type = showing ? "password" : "text";
+      peekBtn.innerHTML = showing ? ICON_EYE : ICON_EYE_OFF;
+      peekBtn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+    });
 
     async function submit(): Promise<void> {
       hideError();
@@ -377,8 +620,8 @@ export function showAccountScreen(): Promise<AccountSession> {
       }
 
       submitBtn.disabled = true;
-      submitBtn.textContent = "AUTHENTICATING...";
-      
+      submitBtn.textContent = "Authenticating...";
+
       try {
         const result = mode === "login"
           ? await loginAccount(username, password)
@@ -391,7 +634,7 @@ export function showAccountScreen(): Promise<AccountSession> {
         const message = err instanceof AccountApiError ? err.message : "Connection failed with the authentication server.";
         showError(message);
         submitBtn.disabled = false;
-        submitBtn.textContent = mode === "login" ? "LOGIN" : "REGISTER";
+        submitBtn.textContent = mode === "login" ? "Sign in" : "Create account";
       }
     }
 
@@ -402,6 +645,16 @@ export function showAccountScreen(): Promise<AccountSession> {
       });
     }
 
-    setTimeout(() => usernameInput.focus(), 100);
+    // Keep the focused field visible when the on-screen keyboard opens.
+    for (const input of [usernameInput, emailInput, passwordInput]) {
+      input.addEventListener("focus", () => {
+        setTimeout(() => input.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+      });
+    }
+
+    // Only auto-focus with a mouse/keyboard; on touch it would pop the keyboard open immediately.
+    if (window.matchMedia("(pointer: fine)").matches) {
+      setTimeout(() => usernameInput.focus(), 100);
+    }
   });
 }

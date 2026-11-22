@@ -5,6 +5,7 @@ import type { ChatLine } from "../net/chatClient.ts";
 import { CHAT_MAX } from "../net/chatClient.ts";
 import type { Input } from "./input.ts";
 import { Modal, el, rankIcon, type PlayerRef } from "./reportPopup.ts";
+import { gmDetector } from "./gmDetector.ts";
 import { GM_CHEAT_LABELS, GM_HOTKEYS, gmCheats, resetGmCheats, runGmAction, type GmActionKey, type GmCheatState, type GmToggleKey } from "./gmCheats.ts";
 
 /** opens / closes the panel (lobby and battle); F8: no browser function, not used by the game (F1 help, F2 / F3 chat, F4 debug, F5 GM HUD, F9 GM ids, F10-F12 browser) */
@@ -230,6 +231,16 @@ const CSS_CHEATS = `
 .pbg-sl { display: grid; grid-template-columns: 110px 1fr 46px; gap: 8px; align-items: center; margin-top: 6px; color: #c5d0e0; font-size: 13px; }
 .pbg-sl input[type=range] { width: 100%; accent-color: #ff8c00; }
 .pbg-sl output { text-align: right; color: #ff8c00; font-weight: 700; }
+.pbg-det { margin-top: 6px; max-height: 180px; overflow: auto; background: rgba(5,7,10,.85); border: 1px solid #2a3447; }
+.pbg-detrow { display: grid; grid-template-columns: 1fr 38px; gap: 2px 8px; padding: 6px 10px; border-left: 3px solid #4a5568; cursor: pointer; font-size: 13px; color: #c5d0e0; }
+.pbg-detrow:hover { background: rgba(255,140,0,.1); }
+.pbg-detrow.lv1 { border-left-color: #e6c84a; }
+.pbg-detrow.lv2 { border-left-color: #ff8c00; }
+.pbg-detrow.lv3 { border-left-color: #e04e4e; }
+.pbg-detnick { font-weight: 700; color: #fff; }
+.pbg-detscore { text-align: right; font-weight: 700; color: #ff8c00; }
+.pbg-detflags { grid-column: 1 / 3; font-size: 12px; color: #8b9bb4; }
+.pbg-detnone { padding: 10px; font-size: 13px; color: #8b9bb4; }
 .pbg-cat { margin-top: 8px; font-family: 'Teko', sans-serif; font-size: 15px; letter-spacing: 1px; color: #ff8c00; border-bottom: 1px solid #2a3447; }
 @media (max-width: 600px) { .pbg-grid { grid-template-columns: 1fr; } }
 `;
@@ -396,6 +407,19 @@ export class GmPanel extends Modal {
       return b;
     };
     const act = (label: string, k: GmActionKey) => btn(label, () => { runGmAction(k); this.say(`${label}: ok`); });
+    /** one-of-N selector bound to a string field of gmCheats */
+    const choice = (title: string, key: "aimPriority" | "aimBone", opts: [string, string][]) => {
+      const seg = el("div", "pbm-seg");
+      const btns = opts.map(([v, t]) => {
+        const b = el("div", "pbm-p", t);
+        b.addEventListener("click", () => { (gmCheats as unknown as Record<string, string>)[key] = v; paint(); });
+        seg.appendChild(b);
+        return [v, b] as const;
+      });
+      const paint = () => btns.forEach(([v, b]) => b.classList.toggle("on", gmCheats[key] === v));
+      this.paintCheats.push(paint); paint();
+      this.section(title, seg);
+    };
 
     cat("CHEATS (client only, GM)");
     group("Visual / ESP", ["wallhack", "esp", "radar"]);
@@ -410,6 +434,8 @@ export class GmPanel extends Modal {
     }
     this.body.appendChild(espParts);
     group("Aim", ["autoHead", "silentAim", "trigger"]);
+    choice("Target priority", "aimPriority", [["crosshair", "Crosshair"], ["distance", "Nearest"], ["hp", "Lowest HP"]]);
+    choice("Aim bone", "aimBone", [["head", "Head"], ["chest", "Chest"], ["legs", "Legs"]]);
     this.body.appendChild(slider("Aim cone", "aimFov", 1, 90, 1, "°"));
     const vis = el("div", "pbg-grid");
     { const chk = el("div", "pbm-chk"); chk.append(el("b", "", "✓"), el("span", "", "Aim only at visible enemies (no wall)"));
@@ -417,7 +443,7 @@ export class GmPanel extends Modal {
       chk.addEventListener("click", () => { gmCheats.aimVisible = !gmCheats.aimVisible; paint(); });
       this.paintCheats.push(paint); paint(); vis.appendChild(chk); }
     this.body.appendChild(vis);
-    group("Combat", ["wallbang", "infAmmo", "noReload", "noRecoil", "noSpread", "rapidFire"]);
+    group("Combat", ["wallbang", "burstAmmo", "infGrenade", "infAmmo", "noReload", "noRecoil", "noSpread", "rapidFire"]);
     this.body.appendChild(slider("Damage x", "damageMult", 1, 20, 1));
     this.body.appendChild(slider("Fire rate x", "rapidFireMult", 1, 10, 0.5));
     group("Player / movement", ["god", "noclip", "noFall"]);
@@ -431,7 +457,35 @@ export class GmPanel extends Modal {
     give.append(act("Full HP", "heal"), act("Restore helmet", "helmet"), act("Refill ammo", "refillAmmo"),
       btn("Reset cheats", () => { resetGmCheats(); this.paintCheats.forEach((p) => p()); }, true));
     this.section("Give / reset (cash, gold and tags: use \"To give a gift\" above with your own nick)", give);
+    group("Bomb mission", ["instantBomb"]);
+    this.buildDetector(group, slider);
     this.makeDraggable();
+  }
+
+  /** cheat detector options; the suspects themselves are drawn above the players' heads (gmEsp.ts drawDetector) */
+  private buildDetector(group: (title: string, keys: GmToggleKey[]) => void, slider: (label: string, key: keyof GmCheatState, min: number, max: number, step: number, unit?: string) => HTMLElement): void {
+    this.body.appendChild(el("div", "pbg-cat", "CHEAT DETECTOR (shown above the players' heads; heuristic)"));
+    group("Detector", ["detector"]);
+    const alert = el("div", "pbm-chk");
+    alert.append(el("b", "", "✓"), el("span", "", "Popup alert when a player becomes suspicious"));
+    const paint = () => alert.classList.toggle("on", gmCheats.detectAlert);
+    alert.addEventListener("click", () => { gmCheats.detectAlert = !gmCheats.detectAlert; paint(); });
+    this.paintCheats.push(paint); paint();
+    const bar = el("div", "pbg-row");
+    const mk = (label: string, fn: () => void, danger = false) => {
+      const b = el("div", `pbm-btn${danger ? " danger" : ""}`, label);
+      b.addEventListener("click", fn);
+      return b;
+    };
+    bar.append(
+      mk("Copy report", () => {
+        const r = gmDetector.report();
+        navigator.clipboard?.writeText(r).then(() => this.say("Report copied."), () => this.say(r));
+      }),
+      mk("Ignore nick above", () => { const n = this.nick.value.trim(); if (!n) { this.say("Choose the player first."); return; } gmDetector.ignoreName(n); this.say(`Detector ignores ${n}.`); }),
+      mk("Clear data + ignores", () => { gmDetector.reset(); this.say("Detector data cleared."); }, true),
+    );
+    this.section("Options", alert, slider("Sensitivity", "detectSens", 0.5, 2, 0.1), bar);
   }
 
   /** drag the window by its title bar (first child of the window element); the window is assumed to be the .pbm-win ancestor of the body */
