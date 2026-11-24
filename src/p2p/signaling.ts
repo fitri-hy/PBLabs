@@ -68,6 +68,8 @@ export class WebSignaling implements HostSignaling, GuestSignaling {
   onHandoff: ((f: HandoffIn) => void) | null = null;
   readonly ready: Promise<RTCIceServer[]>;
   hostOnline = false;
+  /** the /signal socket is closed: a retry has nothing to talk to */
+  isClosed = false;
   private readonly ws: WebSocket;
   private hostWaiters: (() => void)[] = [];
   private queue: string[] = [];
@@ -89,6 +91,7 @@ export class WebSignaling implements HostSignaling, GuestSignaling {
       this.ws.onerror = () => reject(new Error(`p2p: signaling WebSocket error (${url})`));
 
       this.ws.onclose = (ev) => {
+        this.isClosed = true;
         reject(new Error(`p2p: signaling closed (${ev.code} ${ev.reason})`));
         this.onClose?.(`${ev.code} ${ev.reason}`);
       };

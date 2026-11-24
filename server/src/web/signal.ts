@@ -64,7 +64,7 @@ async function fetchCfTurn(keyId: string, token: string, log: (msg: string) => v
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ ttl: CF_TTL_SEC }),
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(2500),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = (await res.json()) as { iceServers?: { urls?: string | string[]; username?: string; credential?: string }[] };
@@ -89,13 +89,29 @@ function cfTurn(log: (msg: string) => void): Promise<IceServer[]> {
   const keyId = env("CF_TURN_KEY_ID"), token = env("CF_TURN_API_TOKEN");
   if (!keyId || !token) return Promise.resolve([]);
   const now = Date.now();
+  const refresh = () => (cfPending ??= fetchCfTurn(keyId, token, log).finally(() => { cfPending = null; }));
   if (cfCache && now - cfCache.at < cfCacheMs()) return Promise.resolve(cfCache.servers);
   if (now - cfFailedAt < cfRetryMs()) return Promise.resolve(cfStillValid());
-  return (cfPending ??= fetchCfTurn(keyId, token, log).finally(() => { cfPending = null; }));
+  // stale-while-revalidate: a credential that is still good (>= 1 h left) is used right away while the new one is fetched in
+  // the background; only the very first call (nothing cached) has to wait for Cloudflare
+  const usable = cfStillValid();
+  if (usable.length) { void refresh(); return Promise.resolve(usable); }
+  return refresh();
 }
 
+/** Call once at server start: the first join of a match does not pay for the Cloudflare call, and the credential is renewed
+ * before it goes stale. No-op without CF_TURN_KEY_ID / CF_TURN_API_TOKEN. */
+export function warmTurn(log: (msg: string) => void): void {
+  if (!env("CF_TURN_KEY_ID") || !env("CF_TURN_API_TOKEN")) return;
+  void cfTurn(log);
+  setInterval(() => void cfTurn(log), 20 * 60_000).unref();
+}
+
+/** the join never waits longer than this for TURN: without it the peer gets STUN / static ICE now (the fetch still finishes and is cached) */
+const TURN_WAIT_MS = 2500;
 async function iceServers(log: (msg: string) => void): Promise<IceServer[]> {
-  return [...staticIceServers(), ...(await cfTurn(log))];
+  const cf = await Promise.race([cfTurn(log), new Promise<IceServer[]>((r) => setTimeout(() => r([]), TURN_WAIT_MS).unref?.())]);
+  return [...staticIceServers(), ...cf];
 }
 
 const ROOM_RE = /^[0-9a-f]{1,8}-[0-9a-f]{1,8}$/;
@@ -171,7 +187,16 @@ function join(ws: WebSocket, key: string, role: "host" | "guest", slot: number, 
   if (role === "host") {
     const res = reservedFor(r);
     if (res && res.slot !== slot) { ws.close(4009, "HOST_RESERVED"); return; }
-    if (r.host) { ws.close(4009, "HOST_TAKEN"); return; }
+    if (r.host) {
+      // the same account on the same slot connecting again (reload / network switch): its old socket may not have noticed
+      // yet, so the new one takes over instead of being refused with HOST_TAKEN and leaving the room without a host
+      if (r.host.playerId === playerId && r.host.slot === slot) {
+        const old = r.host;
+        r.host = null;
+        r.sids.clear();
+        old.ws.close(4001, "replaced");
+      } else { ws.close(4009, "HOST_TAKEN"); return; }
+    }
     if (r.guests.has(slot)) { ws.close(4000, "slot is a guest"); return; }
     r.host = me;
     if (res?.slot === slot) r.reserved = null;

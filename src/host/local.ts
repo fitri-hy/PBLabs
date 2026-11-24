@@ -7,7 +7,8 @@ import type { HostIn, HostOut, HostStats } from "./messages.ts";
 
 /** What LocalHost needs of a Worker (a browser Worker, or a node:worker_threads adapter in tests). */
 export interface WorkerLike {
-  postMessage(m: HostIn): void;
+  /** `transfer`: buffers handed over instead of copied (a browser Worker; adapters may ignore it) */
+  postMessage(m: HostIn, transfer?: Transferable[]): void;
   onmessage: ((e: { data: HostOut }) => void) | null;
   onerror: ((e: { message: string }) => void) | null;
   terminate(): void;
@@ -31,8 +32,9 @@ export class LocalPeer implements MatchTransport {
     this.label = label;
   }
   get isOpen(): boolean { return this.state === 1; }
-  send(data: Uint8Array, _reliable: boolean): void {
-    if (this.state === 1) this.host.post({ t: "dgram", id: this.id, data });
+  /** `transfer` = true: the caller gives `data.buffer` away (no copy into the Worker); it must own the whole buffer */
+  send(data: Uint8Array, _reliable: boolean, transfer = false): void {
+    if (this.state === 1) this.host.post({ t: "dgram", id: this.id, data }, transfer ? [data.buffer] : undefined);
   }
   close(): void {
     if (this.state === 3) return;
@@ -95,6 +97,7 @@ export class LocalHost {
           case "ready": clearTimeout(t); host.restored = m.restored ?? null; resolve(host); break;
           case "snapshot": for (const w of host.snapshotWaiters.splice(0)) w(m.snapshot); break;
           case "dgram": host.peers.get(m.id)?.onmessage?.(m.data, m.rel); break;
+          case "dgramN": for (const id of m.ids) host.peers.get(id)?.onmessage?.(m.data, m.rel); break;
           case "close": { const p = host.peers.get(m.id); host.peers.delete(m.id); p?.closed(m.code, m.reason); break; }
           case "game": host.onGame?.(m.m); break;
           case "log": host.onLog?.(m.line); break;
@@ -136,7 +139,7 @@ export class LocalHost {
   }
 
   /** @internal */
-  post(m: HostIn): void { this.worker.postMessage(m); }
+  post(m: HostIn, transfer?: Transferable[]): void { this.worker.postMessage(m, transfer); }
 
   stop(): void {
     for (const p of this.peers.values()) p.closed(1001, "host stopped");

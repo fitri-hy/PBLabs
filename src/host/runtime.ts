@@ -8,7 +8,25 @@ export function attachHost(port: HostPort): void {
   let core: MatchCore | null = null;
   const peers = new Map<number, { label: string; slot?: number }>();
   let spoofed = 0;
-  const post = (m: HostOut) => port.postMessage(m);
+  // Fan-out batching: MatchCore sends one `code` object to every other player, which used to be N-1 postMessages (and N-1
+  // structured clones) per received datagram. Sends of the same object are grouped and posted once, at the end of the current
+  // task. Anything else posted meanwhile flushes first, so the order of datagrams / close / game messages is kept.
+  const outBox = new Map<Uint8Array, { ids: number[]; rel: boolean }>();
+  let flushQueued = false;
+  const flushOut = () => {
+    flushQueued = false;
+    if (outBox.size === 0) return;
+    const items = [...outBox];
+    outBox.clear();
+    for (const [data, e] of items) port.postMessage(e.ids.length === 1 ? { t: "dgram", id: e.ids[0], data, rel: e.rel } : { t: "dgramN", ids: e.ids, data, rel: e.rel });
+  };
+  const sendOut = (peer: string, data: Uint8Array, rel: boolean) => {
+    const id = Number(peer.slice(1));
+    const e = outBox.get(data);
+    if (e && e.rel === rel) e.ids.push(id); else if (!e) outBox.set(data, { ids: [id], rel }); else port.postMessage({ t: "dgram", id, data, rel });
+    if (!flushQueued) { flushQueued = true; queueMicrotask(flushOut); }
+  };
+  const post = (m: HostOut) => { flushOut(); port.postMessage(m); };
   const log = (line: string) => post({ t: "log", line });
 
   port.onmessage = (e) => {
@@ -17,7 +35,7 @@ export function attachHost(port: HostPort): void {
       if (m.t === "start") {
         const uid = m.uniqueRoomId >>> 0, seed = m.roomSeed >>> 0;
         core = new MatchCore({
-          send: (peer, data, rel) => post({ t: "dgram", id: Number(peer.slice(1)), data, rel }),
+          send: sendOut,
           game: (g) => post({ t: "game", m: g }),
           log,
           warn: (line) => { console.warn(`[p2p host] ${line}`); log(line); },

@@ -10,7 +10,7 @@ import type net from "node:net";
 import { WebSocketServer } from "ws";
 import { config } from "../config.ts";
 import { pool, systemServers, systemChannels, onlineCounts } from "../db.ts";
-import { handleSignal, signalStats } from "./signal.ts";
+import { handleSignal, signalStats, warmTurn } from "./signal.ts";
 import { credentialsSchema } from "./accounts/validation.ts";
 import { registerAccount, loginAccount, AccountApiError } from "./accounts/accounts.ts";
 import { isRateLimited } from "./accounts/rateLimit.ts";
@@ -208,5 +208,6 @@ export async function startWebServer(acceptors: Acceptors, host = config.webHost
     httpServer.listen(port, host, () => resolve());
   });
   log(`listening on ${host}:${port} (tcp targets: ${Object.keys(acceptors).join(", ")})`);
+  warmTurn(log);
   return httpServer;
 }

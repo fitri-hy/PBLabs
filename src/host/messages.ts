@@ -24,6 +24,8 @@ export type HostOut =
   | { t: "ready"; restored?: { startTick: number; slots: number[] } }
   | { t: "snapshot"; snapshot: MatchSnapshot }
   | { t: "dgram"; id: number; data: Uint8Array; rel: boolean }
+  /** the same datagram for several peers (a PVP record fans out to everybody): one message instead of N */
+  | { t: "dgramN"; ids: number[]; data: Uint8Array; rel: boolean }
   | { t: "close"; id: number; code: number; reason: string }
   | { t: "game"; m: GameSyncOut }
   | { t: "log"; line: string }

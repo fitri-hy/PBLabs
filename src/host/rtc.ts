@@ -120,7 +120,10 @@ export class RtcHost {
     const b = asBytes(data);
     if (!b) return; // text frames: not match datagrams
     if (b.length > MAX_DATAGRAM) { this.drop(g.sid, "datagram too big"); return; }
-    try { g.peer.send(b.slice(), false); } catch { this.drop(g.sid, "send to the match failed"); }
+    // a browser delivers each message in its own ArrayBuffer: hand it to the Worker without a copy. A view into a shared
+    // / pooled buffer (node-datachannel) is copied as before.
+    const own = b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && b.buffer instanceof ArrayBuffer;
+    try { g.peer.send(own ? b : b.slice(), false, own); } catch { this.drop(g.sid, "send to the match failed"); }
   }
 
   /** readyState can flip to closed between the check and send (guest leaving, failover): send then throws, drop the link */
