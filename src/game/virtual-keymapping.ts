@@ -6,7 +6,8 @@ import { ICON, RADIO_ICONS, SLOT_ICONS } from "./virtual-icons";
  * Touchscreen controls for the PB web client.
  *
  * Design goals
- * - Mobile gaming layout: floating joystick (left), look-by-drag (right), big FIRE/AIM/JUMP cluster.
+ * - Mobile gaming layout: fixed joystick (bottom-left) with AIM above it and DUAL / LASER beside it,
+ *   look-by-drag on any free spot of the screen (left AND right), big FIRE cluster (bottom-right).
  * - NEVER blocks the game UI under it: the root is pointer-events:none, there is no full-screen
  *   "look area" element. Look / joystick gestures are read from document-level pointer events and
  *   they are ignored whenever the finger lands on a real UI element (button, link, input,
@@ -115,6 +116,8 @@ export class VirtualKeyMapping {
   private sendBtn: HTMLButtonElement | null = null;
   private radioRow: HTMLDivElement | null = null;
   private radioNums: HTMLDivElement | null = null;
+  /** Satu baris di pojok kiri atas: sistem (Menu, Skor, Chat) · senjata (T, G) · radio. */
+  private topBar: HTMLDivElement | null = null;
   private radioTimer = 0;
 
   private abort: AbortController | null = null;
@@ -919,23 +922,7 @@ export class VirtualKeyMapping {
       .vkm-root.vkm-chat .vkm-send { display: flex; }
       .vkm-root.vkm-idle .vkm-send { display: none; }
 
-      /* ---------- Top bars ---------- */
-      .vkm-top {
-        position: absolute;
-        top: var(--vkm-t);
-        left: 50%;
-        transform: translateX(-50%);
-        display: flex;
-        gap: calc(6px * var(--vkm-s));
-        pointer-events: none;
-        z-index: 4;
-      }
-      .vkm-top .vkm-btn {
-        position: relative;
-        width: calc(36px * var(--vkm-s));
-        height: calc(32px * var(--vkm-s));
-        border-radius: 10px;
-      }
+      /* ---------- Top bar (pojok kiri atas, satu baris) ---------- */
 
       .vkm-row {
         position: absolute;
@@ -949,7 +936,9 @@ export class VirtualKeyMapping {
         height: calc(36px * var(--vkm-s));
         border-radius: 10px;
       }
-      .vkm-util  { left: var(--vkm-l); top: calc(var(--vkm-t) + 4px); }
+      .vkm-top   { left: var(--vkm-l); top: var(--vkm-t); z-index: 4; }
+      /* jarak tambahan antar kelompok: sistem | senjata | radio */
+      .vkm-top .vkm-sep { margin-left: calc(8px * var(--vkm-s)); }
       .vkm-weap  { right: var(--vkm-r); top: var(--vkm-t); }
       /* Menu radio: [RADIO] -> Z X C -> nomor pilihan */
       .vkm-radio .vkm-radio-grp { display: none; }
@@ -958,7 +947,7 @@ export class VirtualKeyMapping {
       .vkm-radio-nums {
         position: absolute;
         left: var(--vkm-l);
-        top: calc(var(--vkm-t) + 4px + 44px * var(--vkm-s));
+        top: calc(var(--vkm-t) + 42px * var(--vkm-s));
         display: none;
         grid-template-columns: repeat(5, calc(36px * var(--vkm-s)));
         gap: calc(6px * var(--vkm-s));
@@ -971,13 +960,31 @@ export class VirtualKeyMapping {
         height: calc(36px * var(--vkm-s));
         border-radius: 10px;
       }
+      /* BIDIK (sedang) tepat di tengah-atas analog */
       .vkm-above-joy {
-        left: calc(var(--vkm-l) + var(--vkm-size) / 2);
+        left: calc(var(--vkm-l) + var(--vkm-size) / 2 - ${BTN.medium / 2}px * var(--vkm-s));
         bottom: calc(var(--vkm-b) + var(--vkm-size) + 10px * var(--vkm-s));
-        transform: translateX(-50%);
+        align-items: center;
         gap: calc(10px * var(--vkm-s));
       }
       .vkm-above-joy .vkm-btn {
+        width: calc(44px * var(--vkm-s));
+        height: calc(44px * var(--vkm-s));
+        border-radius: 50%;
+      }
+      /* BIDIK (klik kanan): ukuran sedang, lebih besar dari tombol menu lain */
+      .vkm-above-joy .vkm-aim {
+        width: calc(${BTN.medium}px * var(--vkm-s));
+        height: calc(${BTN.medium}px * var(--vkm-s));
+      }
+      /* F (Dual) dan B (Laser): di kanan analog, sejajar bagian bawah analog */
+      .vkm-beside-joy {
+        left: calc(var(--vkm-l) + var(--vkm-size) + 12px * var(--vkm-s));
+        bottom: calc(var(--vkm-b) + 6px * var(--vkm-s));
+        align-items: center;
+        gap: calc(10px * var(--vkm-s));
+      }
+      .vkm-beside-joy .vkm-btn {
         width: calc(44px * var(--vkm-s));
         height: calc(44px * var(--vkm-s));
         border-radius: 50%;
@@ -1189,7 +1196,8 @@ export class VirtualKeyMapping {
 
   private createTopBar(): void {
     const bar = document.createElement("div");
-    bar.className = "vkm-top";
+    bar.className = "vkm-row vkm-top";
+    this.topBar = bar;
 
     this.makeButton(bar, {
       label: "Menu",
@@ -1215,31 +1223,33 @@ export class VirtualKeyMapping {
     this.hud!.appendChild(bar);
   }
 
+  /**
+   * Lanjutan baris kiri-atas setelah Menu · Skor · Chat, urut dari yang paling sering dipakai:
+   * Ganti senjata (T) · Buang senjata (G) · Radio (+ Z X C yang melebar ke kanan).
+   */
   private createUtilityButtons(): void {
-    const row = document.createElement("div");
-    row.className = "vkm-row vkm-util";
+    const row = this.topBar;
 
-    const items: Array<[html: string, key: string, label: string]> = [
-      [ICON.drop, this.keys.drop, "Buang senjata"],
-    ];
-
-    for (const [html, key, label] of items) {
-      this.makeButton(row, { label, html, key, className: "vkm-num" });
-    }
+    if (!row) return;
 
     // T: ganti senjata. Game membacanya dari event keyboard (sama seperti di desktop),
     // jadi dikirim sebagai keydown + keyup sungguhan, bukan virtual key.
     this.makeButton(row, {
       label: "Ganti senjata",
       html: ICON.weaponMenu,
-      className: "vkm-num",
+      className: "vkm-num vkm-sep",
       onTap: () => this.tapKeyEvent(this.keys.dualWeapon, document.body, TAP_MS),
     });
 
-    // Menu radio ada di baris yang sama: G · T · RADIO · (Z X C)
-    this.createRadioButtons(row);
+    this.makeButton(row, {
+      label: "Buang senjata",
+      html: ICON.drop,
+      key: this.keys.drop,
+      className: "vkm-num",
+    });
 
-    this.hud!.appendChild(row);
+    // Radio paling ujung: tombol Z X C muncul ke kanan tanpa menggeser tombol lain
+    this.createRadioButtons(row);
   }
 
   private createWeaponButtons(): void {
@@ -1279,7 +1289,7 @@ export class VirtualKeyMapping {
   }
 
   /**
-   * Menu radio: [RADIO] -> tampil Z / X / C -> menu radio game terbuka -> tampil nomor pilihan
+   * Menu radio (ujung kanan baris kiri-atas): [RADIO] -> tampil Z / X / C -> menu radio game terbuka -> tampil nomor pilihan
    * grup itu (Z: 1-8,0 · X: 1-8,0 · C: 1-9,0) -> pilih nomor -> tutup.
    */
   private createRadioButtons(row: HTMLDivElement): void {
@@ -1289,7 +1299,7 @@ export class VirtualKeyMapping {
     this.makeButton(row, {
       label: "Menu radio",
       html: ICON.radioMenu,
-      className: "vkm-num vkm-radio-menu",
+      className: "vkm-num vkm-radio-menu vkm-sep",
       onTap: () => this.toggleRadioUi(),
     });
 
@@ -1373,21 +1383,11 @@ export class VirtualKeyMapping {
     });
 
     this.makeButton(hud, {
-      label: "Bidik",
-      html: ICON.aim,
-      className: "vkm-round",
-      mouse: 2,
-      hold: true,
-      look: true,
-      br: { x: 108, y: 8, size: BTN.normal },
-    });
-
-    this.makeButton(hud, {
       label: "Lompat",
       html: ICON.jump,
       className: "vkm-round",
       key: this.keys.jump,
-      br: { x: 14, y: 242, size: BTN.normal },
+      br: { x: 14, y: 244, size: BTN.normal },
     });
 
     this.makeButton(hud, {
@@ -1405,7 +1405,7 @@ export class VirtualKeyMapping {
       html: ICON.swap,
       className: "vkm-round",
       key: this.keys.lastWeapon,
-      br: { x: 10, y: 108, size: BTN.medium },
+      br: { x: 14, y: 112, size: BTN.medium },
     });
 
     this.makeButton(hud, {
@@ -1413,7 +1413,7 @@ export class VirtualKeyMapping {
       html: ICON.reload,
       className: "vkm-round",
       key: this.keys.reload,
-      br: { x: 112, y: 76, size: BTN.normal },
+      br: { x: 112, y: 18, size: BTN.normal },
     });
 
     this.makeButton(hud, {
@@ -1422,28 +1422,43 @@ export class VirtualKeyMapping {
       className: "vkm-round",
       key: this.keys.action,
       hold: true,
-      br: { x: 84, y: 146, size: BTN.normal },
+      br: { x: 88, y: 84, size: BTN.normal },
     });
 
-    // F (extension2 / Dual) dan B (extension / Laser): satu baris sejajar, tepat di atas analog
+    // BIDIK (klik kanan, ukuran sedang): tepat di atas analog
     const joyKeys = document.createElement("div");
     joyKeys.className = "vkm-row vkm-above-joy";
 
     this.makeButton(joyKeys, {
+      label: "Bidik",
+      html: ICON.aim,
+      className: "vkm-round vkm-aim",
+      mouse: 2,
+      hold: true,
+      look: true,
+    });
+
+    hud.appendChild(joyKeys);
+
+    // F (extension2 / Dual) dan B (extension / Laser): di kanan analog, sebelah bawah
+    const sideKeys = document.createElement("div");
+    sideKeys.className = "vkm-row vkm-beside-joy";
+
+    this.makeButton(sideKeys, {
       label: "Dual",
       html: ICON.dual,
       className: "vkm-round",
       key: this.keys.extension2,
     });
 
-    this.makeButton(joyKeys, {
+    this.makeButton(sideKeys, {
       label: "Laser",
       html: ICON.laser,
       className: "vkm-round",
       key: this.keys.extension,
     });
 
-    hud.appendChild(joyKeys);
+    hud.appendChild(sideKeys);
 
     this.makeButton(hud, {
       label: "Jalan pelan",
@@ -1451,7 +1466,7 @@ export class VirtualKeyMapping {
       className: "vkm-round",
       key: this.keys.walk,
       hold: true,
-      br: { x: 172, y: 22, size: BTN.normal },
+      br: { x: 176, y: 18, size: BTN.normal },
     });
   }
 
@@ -1700,12 +1715,9 @@ export class VirtualKeyMapping {
     if (!target || this.root?.contains(target)) return;
     if (this.isInteractive(target)) return;
 
-    const leftZone = e.clientX < window.innerWidth * 0.42;
-
-    // Left side belongs to the fixed joystick base (it handles its own touch).
-    if (!leftZone) {
-      this.lookPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    }
+    // Look works on BOTH sides of the screen. The fixed joystick base and every button
+    // own their touch (the checks above already skipped them), so any other free spot aims.
+    this.lookPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   };
 
   private onPointerMove = (e: PointerEvent): void => {
