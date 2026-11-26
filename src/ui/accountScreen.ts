@@ -1,5 +1,6 @@
 import { registerAccount, loginAccount, tokenToBytes, AccountApiError } from "../net/accountApi.js";
 import { Stage } from "../lobby/ui/LayoutRenderer.ts";
+import { canOfferInstall, installHint, onInstallChange, promptInstall } from "../pwa/install.ts";
 
 export interface AccountSession {
   token: Uint8Array;
@@ -325,6 +326,29 @@ function ensureStyles(): void {
     .pb-account-btn:active:not(:disabled) { transform: translateY(1px); }
     .pb-account-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+    /* Install Application (iOS / Android only, under the submit button) */
+    .pb-account-btn--install {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: transparent;
+      color: var(--pb-text);
+      border: 1px solid var(--pb-line-strong);
+    }
+    .pb-account-btn--install:hover:not(:disabled) { background: rgba(76, 195, 255, 0.1); border-color: var(--pb-accent); }
+    .pb-account-btn--install svg { width: 20px; height: 20px; flex: 0 0 auto; }
+    .pb-acc__install-hint {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: #0e151d;
+      border: 1px solid var(--pb-line);
+      border-left: 3px solid var(--pb-accent);
+      border-radius: 2px;
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--pb-muted);
+    }
     .pb-account-error {
       display: none;
       margin-top: 16px;
@@ -454,6 +478,8 @@ const ICON_LOCK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICON_EYE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const ICON_EYE_OFF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A16.6 16.6 0 0 0 2 12s3.5 7 10 7c1.5 0 2.9-.4 4.1-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>`;
 
+const ICON_INSTALL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>`;
+
 export function showAccountScreen(): Promise<AccountSession> {
   ensureStyles();
 
@@ -512,6 +538,8 @@ export function showAccountScreen(): Promise<AccountSession> {
         </div>
 
         <button class="pb-account-btn" id="pb-acc-submit" type="button">Sign in</button>
+        <button class="pb-account-btn pb-account-btn--install" id="pb-acc-install" type="button" hidden>${ICON_INSTALL}<span>Install Application</span></button>
+        <div class="pb-acc__install-hint" id="pb-acc-install-hint" role="status" hidden></div>
 
         <div class="pb-account-error" id="pb-acc-error" role="alert"></div>
 
@@ -564,6 +592,8 @@ export function showAccountScreen(): Promise<AccountSession> {
     const errorBox = overlay.querySelector<HTMLElement>("#pb-acc-error")!;
     const mainTitle = overlay.querySelector<HTMLElement>("#pb-auth-main-title")!;
     const subTitle = overlay.querySelector<HTMLElement>("#pb-auth-sub-title")!;
+    const installBtn = overlay.querySelector<HTMLButtonElement>("#pb-acc-install")!;
+    const installHintBox = overlay.querySelector<HTMLElement>("#pb-acc-install-hint")!;
 
     function setMode(next: "login" | "register"): void {
       mode = next;
@@ -628,6 +658,7 @@ export function showAccountScreen(): Promise<AccountSession> {
           : await registerAccount(username, password, email);
 
         protectionController.abort();
+        offInstall();
         overlay.remove();
         resolve({ token: tokenToBytes(result.token), username: result.nickname });
       } catch (err) {
@@ -639,6 +670,21 @@ export function showAccountScreen(): Promise<AccountSession> {
     }
 
     submitBtn.addEventListener("click", () => void submit());
+    // PWA: the button exists on iOS / Android only and goes away once the app is installed
+    const syncInstall = (): void => {
+      installBtn.hidden = !canOfferInstall();
+      if (installBtn.hidden) installHintBox.hidden = true;
+    };
+    syncInstall();
+    const offInstall = onInstallChange(syncInstall);
+    installBtn.addEventListener("click", () => {
+      void promptInstall().then((r) => {
+        if (r === "manual") {
+          installHintBox.textContent = installHint();
+          installHintBox.hidden = false;
+        } else syncInstall();
+      });
+    });
     for (const input of [usernameInput, emailInput, passwordInput]) {
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") void submit();

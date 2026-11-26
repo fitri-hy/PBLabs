@@ -8,22 +8,48 @@
 //   everything else (page, /bundle, /api, WebSocket signalling), non-GET, Range (audio)    -> not intercepted
 // Only 200 CORS responses are stored (an opaque one costs ~7 MB of padded quota): the Worker answers
 // Access-Control-Allow-Origin: *, so a no-cors request (CSS background) is refetched here with mode cors.
+// Same-origin (PWA + speed; also works without VITE_ASSET_BASE, where the game assets are served from the page origin):
+//   page '/' (navigation)                                  -> network-first, the last good copy is the offline fallback
+//   /assets/ vite bundle (name-<hash>.js|css|wasm|font)    -> cache-first
+//   /assets/ any other file, manifest, cursor              -> stale-while-revalidate (first visit downloads, next ones are instant)
+//   /api, WebSocket signalling, the sw itself, other pages -> not intercepted
 // Cleanup: caches of an older SW version are deleted on activate; when a new asset map is fetched, hashed entries it no
 // longer lists are deleted; past BUDGET (or 60% of the quota) the oldest entries go first.
 const CACHE = 'pb-assets-v1';
+const SHELL = 'pb-shell-v1';
+/** warmed at install (each one optional: a 404 on a build whose assets live on the asset store is ignored) */
+const PRECACHE = [
+  '/manifest.webmanifest',
+  '/assets/icons/android/launchericon-192x192.png',
+  '/assets/ui/cross/brand/icon.png',
+  '/assets/ui/cross/brand/login-bg.jpg',
+];
 const BUDGET = 2 * 1024 * 1024 * 1024;
 const HASHED = /\.[0-9a-f]{8}\.[A-Za-z0-9]+$/;
 const MAP_NAME = /(^|\/)asset-map\.([0-9a-f]{8}\.)?json$/;
+/** vite output under /assets/: name-<8 chars>.js|css|... (immutable) */
+const VITE_HASHED = /^\/assets\/.+-[A-Za-z0-9_-]{8}\.(?:m?js|css|wasm|woff2?)$/;
 
-/** ctx: { assetOrigin: string|null, method: string, range: boolean } -> 'cache-first' | 'network-first' | 'swr' | 'bypass' */
+/**
+ * ctx: { assetOrigin: string|null, method: string, range: boolean, selfOrigin?: string, navigate?: boolean }
+ * -> 'cache-first' | 'network-first' | 'swr' | 'shell' | 'bypass'
+ */
 function strategyFor(url, ctx) {
-  if (ctx.method !== 'GET' || ctx.range || !ctx.assetOrigin) return 'bypass';
+  if (ctx.method !== 'GET' || ctx.range) return 'bypass';
   let u;
   try { u = new URL(url); } catch { return 'bypass'; }
-  if (u.origin !== ctx.assetOrigin) return 'bypass';
-  if (HASHED.test(u.pathname)) return 'cache-first';
-  if (MAP_NAME.test(u.pathname)) return 'network-first';
-  return 'swr';
+  if (ctx.assetOrigin && u.origin === ctx.assetOrigin) {
+    if (HASHED.test(u.pathname)) return 'cache-first';
+    if (MAP_NAME.test(u.pathname)) return 'network-first';
+    return 'swr';
+  }
+  if (ctx.selfOrigin && u.origin === ctx.selfOrigin) {
+    const p = u.pathname;
+    if (ctx.navigate) return p === '/' || p === '/index.html' ? 'shell' : 'bypass';
+    if (p.startsWith('/assets/')) return HASHED.test(p) || VITE_HASHED.test(p) ? 'cache-first' : 'swr';
+    if (p === '/manifest.webmanifest' || p === '/pb-cursor.cur') return 'swr';
+  }
+  return 'bypass';
 }
 
 /** bytes the cache may hold: BUDGET, or 60% of the browser quota when that is smaller */
@@ -67,7 +93,7 @@ function staleKeys(keys, valid, assetOrigin) {
   });
 }
 
-const core = { CACHE, strategyFor, budgetFor, planTrim, validUrls, staleKeys };
+const core = { CACHE, SHELL, strategyFor, budgetFor, planTrim, validUrls, staleKeys };
 
 if (typeof module === 'object' && module.exports) {
   module.exports = core; // node smoke (tools/test-sw.mjs)
@@ -75,7 +101,11 @@ if (typeof module === 'object' && module.exports) {
   const params = new URL(self.location.href).searchParams;
   const assetOrigin = params.get('base');
   const ok = (res) => res && res.status === 200 && res.type !== 'opaque';
-  const fetchAsset = (req) => fetch(req.url, { mode: 'cors', credentials: 'omit' }).catch(() => fetch(req));
+  const selfOrigin = self.location.origin;
+  // the asset store answers with CORS *: a no-cors request is refetched with mode cors; same-origin files keep the request as is
+  const fetchAsset = (req) => (new URL(req.url).origin === selfOrigin
+    ? fetch(req)
+    : fetch(req.url, { mode: 'cors', credentials: 'omit' }).catch(() => fetch(req)));
 
   let trimAt = 0;
   async function trim(cache) {
@@ -104,7 +134,27 @@ if (typeof module === 'object' && module.exports) {
     } catch { /* not a map */ }
   }
 
+  /** the page: network-first, the last good copy of '/' is the offline fallback (one entry: other navigations bypass) */
+  async function handleShell(ev) {
+    const shell = await caches.open(SHELL);
+    try {
+      const res = await fetch(ev.request);
+      if (ok(res)) ev.waitUntil(shell.put('/', res.clone()));
+      return res;
+    } catch (e) {
+      const hit = await shell.match('/');
+      if (hit) return hit;
+      throw e;
+    }
+  }
+
+  async function precache() {
+    const cache = await caches.open(CACHE);
+    await Promise.allSettled(PRECACHE.map((u) => cache.add(u)));
+  }
+
   async function handle(ev, kind) {
+    if (kind === 'shell') return handleShell(ev);
     const req = ev.request;
     const cache = await caches.open(CACHE);
     const hit = await cache.match(req.url);
@@ -122,15 +172,26 @@ if (typeof module === 'object' && module.exports) {
     try { return await refresh(); } catch (e) { if (hit) return hit; throw e; } // network-first
   }
 
-  self.addEventListener('install', () => self.skipWaiting());
+  self.addEventListener('install', (ev) => {
+    ev.waitUntil(precache().catch(() => {}));
+    self.skipWaiting();
+  });
   self.addEventListener('activate', (ev) => {
     ev.waitUntil((async () => {
-      for (const k of await caches.keys()) if (k.startsWith('pb-assets-') && k !== CACHE) await caches.delete(k);
+      for (const k of await caches.keys()) {
+        if ((k.startsWith('pb-assets-') && k !== CACHE) || (k.startsWith('pb-shell-') && k !== SHELL)) await caches.delete(k);
+      }
       await self.clients.claim();
     })());
   });
   self.addEventListener('fetch', (ev) => {
-    const kind = strategyFor(ev.request.url, { assetOrigin, method: ev.request.method, range: ev.request.headers.has('range') });
+    const kind = strategyFor(ev.request.url, {
+      assetOrigin,
+      selfOrigin,
+      method: ev.request.method,
+      range: ev.request.headers.has('range'),
+      navigate: ev.request.mode === 'navigate',
+    });
     if (kind !== 'bypass') ev.respondWith(handle(ev, kind));
   });
 }

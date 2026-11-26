@@ -22,11 +22,13 @@ import { CHANNEL_TYPE_CLAN } from "./net/authClient.ts";
 import { ClanClient } from "./net/clanClient.ts";
 import type { MissionClient } from "./net/missionClient.ts";
 import { installAssetCache } from "./cache/register.ts";
+import { installPwa } from "./pwa/install.ts";
 import { jsonOnce } from "./jsonOnce.ts";
 import { getSettings } from "./gameplay/settings.ts";
 import { initMobileSendButton } from "./mobileSendButton.ts";
 
 installAssetCache(); // prod only: service worker + persistent storage + "browser keeps no cache" warning
+installPwa(); // prod only: /sw.js (page + asset cache, PWA) in a build without VITE_ASSET_BASE
 initMobileSendButton();
 
 /** Common surface boot.ts needs from every lobby flow (LobbyScreenCross default, LobbyScreen ?lobby=web). */
