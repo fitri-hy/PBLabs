@@ -54,7 +54,9 @@ const CSS = `
 #pbhud .pbhud-mission{position:absolute;left:0;top:0;display:none}
 #pbhud .pbhud-mission>*{position:absolute;display:block;background-repeat:no-repeat}
 #pbhud .pbhud-mission>.tx{white-space:pre;color:#fff}
-#pbhud .pbhud-dbg{position:absolute;right:6px;bottom:120px;font:11px monospace;color:#9f9;white-space:pre;opacity:.7;text-align:right}
+/* FPS: di dalam this.ui (ruang koordinat yang sama dengan card HP/peluru, charaPanel.ts). Tepi atas card = H-104, kiri card = W-176;
+ bottom 110 = 104 + jarak 6px. Kiri-rata supaya tidak menabrak ikon helm/granat di sisi kanan atas card. */
+#pbhud .pbhud-dbg{position:absolute;left:calc(100% - 176px);bottom:110px;font:10px/1 monospace;color:#9f9;white-space:pre;opacity:.7;text-align:left;text-shadow:1px 1px 0 rgba(32,32,32,.78)}
 `;
 
 /** The 2017 HUD text nodes (kill list, system lines) use the font set GameInterface::OnInitInstance 0x6a8af0 builds from 0x4ac520 = "Arial" (regular, weight 0x190, 10 pt = 13 px by i3Gfx::FontPointToPixel); the BR UI font "Arial Negrito" is only the i3UI controls' (CGameFramework::OnCreate SetFontName _Font). */
@@ -286,7 +288,8 @@ export class PbHud {
     this.root.appendChild(this.help);
     this.undecoded = document.createElement("div");
     this.undecoded.style.display = "none";
-    this.root.append(this.bloodCv, this.box, this.fx, this.dbg, this.flash);
+    this.ui.appendChild(this.dbg); // FPS ikut skala HUD, sejajar dengan card HP/peluru
+    this.root.append(this.bloodCv, this.box, this.fx, this.flash);
     host.appendChild(this.root);
     this.fit();
     void this.load();

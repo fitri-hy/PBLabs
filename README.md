@@ -62,18 +62,25 @@ npm start
 
 ## Main Commands
 
-| Command | Description |
-| --- | --- |
-| `npm start` | Run server & Vite (both) locally |
-| `npm start -- --docker` | Run both with Docker DB |
-| `npm start -- --frontend` | Run frontend only (Port 8000) |
-| `npm start -- --backend` | Run backend only (Port 8090) |
-| `npm start -- --backend --docker` | Run backend only with Docker DB |
-| `npm run dev:all` | Alternative command to run server & Vite |
-| `npm run typecheck` | Run TypeScript type check |
-| `npm run build` | Build production version |
-| `npm run status` | Check port & service status |
-| `npm run download -- --assets --0.0.1` | Automatically download and extract release assets to `public/` |
+| Command                     | Description                                                                                           |
+| --------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `npm start`                 | Run production (server + static `dist`, without Vite). Automatically builds if `dist` does not exist. |
+| `npm start -- --docker`     | Run production with Docker DB.                                                                        |
+| `npm run start:build`       | Force rebuild `dist`, then run production.                                                            |
+| `npm run start:web`         | Run static frontend only (port 8000).                                                                 |
+| `npm run start:status`      | Check production ports and service status.                                                            |
+| `npm run build:prod`        | Build production files into `dist/`.                                                                  |
+| `npm run dev`               | Run server + Vite (previously `npm start`).                                                           |
+| `npm run dev -- --docker`   | Run development with Docker DB.                                                                       |
+| `npm run dev -- --frontend` | Run frontend only (port 8000).                                                                        |
+| `npm run dev -- --backend`  | Run backend only (port 8090).                                                                         |
+| `npm run dev:vite`          | Run Vite only (previously `npm run dev`).                                                             |
+| `npm run dev:all`           | Alternative: run server + Vite.                                                                       |
+| `npm run dev:all:nowatch`   | Same as `dev:all`, but without file watching/HMR.                                                     |
+| `npm run dev:alt`           | Run alternative Vite setup.                                                                           |
+| `npm run dev:status`        | Check development ports and service status (previously `npm run status`).                             |
+| `npm run dev:build`         | Build in default mode, not production mode (previously `npm run build`).                              |
+| `npm run dev:preview`       | Run Vite preview (previously `npm run preview`).   
 
 ---
 

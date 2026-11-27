@@ -1,9 +1,11 @@
-// The account API lives in the same process as the PB WebSocket endpoints (server/src/web), port 8090.
-// Production build: VITE_API_URL = the server's https origin (Cloud Run), the page itself being
-// on another origin (Firebase Hosting), which the server's CORS list has to allow.
+
+    
+  
+// Local backend listens on 8090. In production, /api is exposed by the same-origin
+// reverse proxy, so no environment-specific URL or public port is required.
 const ACCOUNT_API_PORT = 8090;
-/** import.meta.env is undefined outside Vite (the Node tests) */
-const API_URL = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_API_URL;
+/** import.meta.env is undefined outside Vite (the Node tests). */
+const IS_DEV = (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
 
 export interface AccountApiResult {
   token: string; // base64 of the raw token bytes the game server expects
@@ -21,7 +23,12 @@ export class AccountApiError extends Error {
 }
 
 function accountApiUrl(path: string): string {
-  return API_URL ? `${API_URL.replace(/\/+$/, "")}${path}` : `http://${location.hostname}:${ACCOUNT_API_PORT}${path}`;
+  if (typeof location === "undefined") throw new Error("Account API is only available in a browser");
+  // Vite dev server and backend run on different ports. Production routes /api
+  // through the public origin (HTTPS default port), without exposing :8090.
+  return IS_DEV
+    ? `http://${location.hostname}:${ACCOUNT_API_PORT}${path}`
+    : `${location.origin}${path}`;
 }
 
 async function postCredentials(
@@ -76,3 +83,4 @@ export function tokenToBytes(base64Token: string): Uint8Array {
   }
   return bytes;
 }
+

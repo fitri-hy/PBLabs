@@ -94,6 +94,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0",
     port: 8000,
+    allowedHosts: true,
     strictPort: false,
     ...(noHmr ? { hmr: false, watch: null } : {}),
   },

@@ -4,6 +4,7 @@
 // Multi-VPS: one Postgres, several processes. PB_GAME_SERVER_IDS picks the system_servers rows this process hosts,
 // PB_TICKET_SECRET makes the enter ticket valid on every node, system_servers.gateway tells the client where a row
 // lives (GET /api/nodes). Without those env vars this file behaves exactly as the single-node server always has.
+import "./logFilter.ts"; // first import: PB_LOG_QUIET=1 hides the log lines that repeat on every login
 import { startAuthServer, accept as acceptAuth } from "./auth/authServer.ts";
 import { startGameServers, acceptGame } from "./game/gameServer.ts";
 import { startWebServer, ensureAccountSchema, type Acceptors } from "./web/webServer.ts";

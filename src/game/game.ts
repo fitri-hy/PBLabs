@@ -400,6 +400,8 @@ export class Game implements BotHost {
   private gmBombCool = 0;
   private gmGrenadeRefill = 0;
   private gmDetTrackT = 0;
+  /** time of the last map-prop break: a barrel / car blast can kill with the breaker's weapon name, that is no shot through a wall */
+  private gmDetPropT = -99;
   private gmDetTickT = 0;
   private gmDetPrev = new Map<string, { x: number; z: number }>();
   private gmDetDir = new Map<string, THREE.Vector3>();
@@ -573,7 +575,7 @@ export class Game implements BotHost {
     g.match.onPhase((ph) => g.onPhase(ph));
     const mapProps = currentMapProps();
     if (mapProps) mapProps.onAmbient = (p, s) => g.pbWeapons()?.audio.playAt(`objects/${s.clip}`, p.center, { info: propSoundInfo(s) });
-    if (mapProps) mapProps.onBreak = (p, remote) => { g.propBroken(p); if (!remote) g.net.sendPropBreak?.(p.index); if (!remote && g.propBreaker) g.propExplosionHurt(g.propBreaker, p); };
+    if (mapProps) mapProps.onBreak = (p, remote) => { g.gmDetPropT = g.time; g.propBroken(p); if (!remote) g.net.sendPropBreak?.(p.index); if (!remote && g.propBreaker) g.propExplosionHurt(g.propBreaker, p); };
     g.match.addActor(g.me);
 
     const params = new URLSearchParams(location.search);
@@ -2690,6 +2692,26 @@ export class Game implements BotHost {
     }
   }
 
+  /** cheat detector: a remote player's kill with the map between his eye and the victim (chest AND head both blocked).
+   *  Bullets never pass the map (only the GM wallbang cheat does, see applyHit), so a gun kill through geometry is flagged.
+   *  Knives, grenades, C4, falls and prop blasts are no shots through a wall and are skipped. Reported through gmDetector.onAlert,
+   *  the same notice as its other flags. */
+  private detWallKill(killer: Actor, victim: Actor, weapon: string): void {
+    if (!gmDetector.enabled || killer === victim || killer.team === victim.team) return;
+    if (this.time - this.gmDetPropT < 1.5) return; // a prop blast just went off
+    const def = this.pbWeapons()?.db.find(weapon);
+    if (!def || def.family === "KNIFE" || def.family === "GRENADE" || weapon === "C4") return;
+    const eye = killer.eye(this.gmDetA), feet = victim.feet(this.gmDetC);
+    let blocked = 0;
+    for (const h of [1.2, 1.65]) { // chest and head must BOTH be behind the world, else it is a corner / edge
+      const dx = feet.x - eye.x, dy = feet.y + h - eye.y, dz = feet.z - eye.z, dist = Math.hypot(dx, dy, dz);
+      if (dist < 2) return;
+      const wall = this.world.castRay(new this.R.Ray({ x: eye.x, y: eye.y, z: eye.z }, { x: dx / dist, y: dy / dist, z: dz / dist }), dist, true, undefined, WORLD_ONLY_QUERY);
+      if (wall && wall.timeOfImpact < dist - 0.5) blocked++;
+    }
+    if (blocked === 2) gmDetector.onAlert?.(killer.name, `killed ${victim.name} through a wall (${weapon})`);
+  }
+
   private isGM(): boolean {
     return this.gmParam || chat.isGM || !!(this.net as unknown as { room?: { isGM?: boolean } | null }).room?.isGM; // chat.isGM: the server's GM notice in the lobby
   }
@@ -3096,12 +3118,7 @@ export class Game implements BotHost {
       return { rel, dist: n.dist, indicatorType: n.indicatorType };
     }));
 
-    const bots = this.bots.filter((b) => b.alive).length;
-    h.debug(
-      `FPS ${h.fps} · ${this.levelName}\n` +
-      `pos ${myFeet.x.toFixed(1)} ${myFeet.y.toFixed(1)} ${myFeet.z.toFixed(1)} ${this.player.isGrounded() ? "grounded" : "air"}${this.player.isSilent() ? " silent" : ""}\n` +
-      `nav ${this.nav?.size ?? 0} · bots ${bots}/${this.bots.length} · net ${this.net.mode}` +
-      (this.bomb ? this.bombDebug(myFeet) : "")
-    );
+    // Hanya info FPS yang ditampilkan (pos, nav, bots, net, bomb disembunyikan).
+    h.debug(`FPS ${h.fps}`);
   }
 }

@@ -127,6 +127,11 @@ export const config = {
    * [RECRIADO: the web client sends a few per second, 17 at most at once (3666 per slot)] */
   pktBurst: Number(env("PB_PKT_BURST", "60")),
   pktPerSec: Number(env("PB_PKT_PER_SEC", "30")),
+  /** PB_LOG_QUIET=1: hide the lines that repeat on every login (attendance / login-gift goods missing from the catalog): each
+   *  distinct one is shown once per process, then silent (src/logFilter.ts). Default off, so dev keeps the full log. */
+  logQuiet: env("PB_LOG_QUIET", "") === "1",
+  /** PB_LOG_HIDE=<regex>: with PB_LOG_QUIET=1, also hide every line that matches this regex (use a|b for several). */
+  logHide: env("PB_LOG_HIDE", ""),
   /** SChannelXML.Apply: PB_ADVERTISE_HOST replaces system_servers.host. */
   advertiseHost: env("PB_ADVERTISE_HOST", ""),
   /** PB_TICKET_SECRET=<hex or text>: HMAC secret of the enter/signal tickets (web/signalTicket.ts). One Postgres shared

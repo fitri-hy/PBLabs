@@ -22,26 +22,28 @@ export class EarlyCloseError extends Error {}
 
 type Listener = (opcode: number, r: PacketReader) => void;
 
-/** Production build: the server's wss origin (wss://<service>.run.app). import.meta.env is
- *  undefined outside Vite (the Node tests). */
+/** import.meta.env is undefined outside Vite (the Node tests). */
 const ENV = (import.meta as { env?: Record<string, string | boolean | undefined> }).env;
-const GW_URL = ENV?.VITE_GW_URL as string | undefined;
-/** Vite dev server only: `?gw=` / localStorage "pbweb.gw" may point the client at another server. A production build ignores
- *  both. */
+/** Only local development accepts a gateway override. Production always uses the current page origin. */
 export const GW_OVERRIDE = ENV?.DEV === true;
 
 /** The enter ticket of each logged-in account (playerId -> ticket): the Auth's text frame after LOGIN, sent back to the
  *  Game before USER_ENTER */
 export const enterTickets = new Map<bigint, string>();
 
-/** ?gw= first (dev build only), then the build's VITE_GW_URL, then the page's own host on the server web port (dev). */
+/**
+ * Local: the web backend listens on 8090, independently of Vite's dev port.
+ * Production: the reverse proxy exposes /tcp on the same origin as the page,
+ * so use its host and standard HTTPS/WSS port (never append :8090).
+ */
 export function defaultServerUrl(): string {
   const qs = GW_OVERRIDE && typeof location !== "undefined" ? new URLSearchParams(location.search).get("gw") : null;
   if (qs) return qs;
-  if (GW_URL) return GW_URL;
-  const host = typeof location !== "undefined" && location.hostname ? location.hostname : "127.0.0.1";
-  const proto = typeof location !== "undefined" && location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${host}:8090`;
+
+  if (typeof location === "undefined") return "ws://127.0.0.1:8090";
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  if (GW_OVERRIDE) return `${proto}//${location.hostname}:8090`;
+  return `${proto}//${location.host}`;
 }
 
 /** PROTOCOL_BASE_CONNECT_ACK (2306), identical on Auth and Game. Reader positioned after opcode. */
