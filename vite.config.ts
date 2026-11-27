@@ -10,6 +10,17 @@ import { assetResolver, cssUrls, type AssetMap } from "./src/assetMap.ts";
 // vite reloads are a separate system and were unaffected by it). Manual reload = browser F5.
 const noHmr = process.env.PB_VITE_HMR === "0";
 
+// Dev/preview: same concept as scripts/serve-prod.mjs. /api (http) and /signal + /tcp (http / WebSocket) are
+// forwarded to the game/web server, so the client only ever talks to its own origin (no mixed content when the page
+// is opened over https, no :8090 to expose). Patterns are identical to `isProxied` in serve-prod.mjs.
+//   PB_API_HOST=127.0.0.1   PB_API_PORT=8090
+const API_TARGET = `http://${process.env.PB_API_HOST || "127.0.0.1"}:${Number(process.env.PB_API_PORT) || 8090}`;
+const apiProxy = {
+  "^/api(?:[/?]|$)": { target: API_TARGET },
+  "^/signal(?:[/?]|$)": { target: API_TARGET, ws: true },
+  "^/tcp(?:[/?]|$)": { target: API_TARGET, ws: true },
+};
+
 /** `npm run build:prod`: dist gets the bundle and the small public
  *  files (the cursor) but not public/assets (4 GB, published to the R2 asset store by the deploy scripts),
  *  plus noindex + robots.txt (the assets are Zepetto's). */
@@ -96,7 +107,11 @@ export default defineConfig(({ mode }) => ({
     port: 8000,
     allowedHosts: true,
     strictPort: false,
+    proxy: apiProxy,
     ...(noHmr ? { hmr: false, watch: null } : {}),
+  },
+  preview: {
+    proxy: apiProxy,
   },
   // es2022: src/assetBoot.ts awaits the asset map at the top level. assetsDir: the bundle must stay out of /assets/,
   // the tree the asset map sends to the asset store

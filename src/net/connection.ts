@@ -32,17 +32,17 @@ export const GW_OVERRIDE = ENV?.DEV === true;
 export const enterTickets = new Map<bigint, string>();
 
 /**
- * Local: the web backend listens on 8090, independently of Vite's dev port.
- * Production: the reverse proxy exposes /tcp on the same origin as the page,
- * so use its host and standard HTTPS/WSS port (never append :8090).
+ * Same origin as the page in dev and production: /tcp (and /signal, /api) is proxied to the web backend by the
+ * Vite dev server (vite.config.ts, server.proxy) or by scripts/serve-prod.mjs / the reverse proxy. ws:// or wss://
+ * follows the page's protocol, so an https page never opens an insecure ws://host:8090 (mixed content).
+ * The only exception is the explicit dev override ?gw=ws://host:port.
  */
 export function defaultServerUrl(): string {
   const qs = GW_OVERRIDE && typeof location !== "undefined" ? new URLSearchParams(location.search).get("gw") : null;
   if (qs) return qs;
 
-  if (typeof location === "undefined") return "ws://127.0.0.1:8090";
+  if (typeof location === "undefined") return "ws://127.0.0.1:8090"; // Node tests: no page, talk to the local backend
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  if (GW_OVERRIDE) return `${proto}//${location.hostname}:8090`;
   return `${proto}//${location.host}`;
 }
 

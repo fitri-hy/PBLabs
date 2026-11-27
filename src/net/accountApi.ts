@@ -1,11 +1,6 @@
-
-    
-  
-// Local backend listens on 8090. In production, /api is exposed by the same-origin
-// reverse proxy, so no environment-specific URL or public port is required.
-const ACCOUNT_API_PORT = 8090;
-/** import.meta.env is undefined outside Vite (the Node tests). */
-const IS_DEV = (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
+// /api is always same-origin: in dev the Vite server proxies it to the backend (vite.config.ts, server.proxy),
+// in production scripts/serve-prod.mjs / the reverse proxy does. So the page's own protocol (https) is reused
+// and nothing is ever requested from :8090 directly (no mixed content).
 
 export interface AccountApiResult {
   token: string; // base64 of the raw token bytes the game server expects
@@ -24,11 +19,7 @@ export class AccountApiError extends Error {
 
 function accountApiUrl(path: string): string {
   if (typeof location === "undefined") throw new Error("Account API is only available in a browser");
-  // Vite dev server and backend run on different ports. Production routes /api
-  // through the public origin (HTTPS default port), without exposing :8090.
-  return IS_DEV
-    ? `http://${location.hostname}:${ACCOUNT_API_PORT}${path}`
-    : `${location.origin}${path}`;
+  return `${location.origin}${path}`;
 }
 
 async function postCredentials(
@@ -83,4 +74,3 @@ export function tokenToBytes(base64Token: string): Uint8Array {
   }
   return bytes;
 }
-
