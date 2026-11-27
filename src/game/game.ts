@@ -203,6 +203,9 @@ class PlayerActor implements Actor {
   }
 }
 
+/** keyboard key of the quick turn. NOTE: KeyF is also the default of the Dual weapon key (extension2): change it here if both must not fire together */
+const QUICK_TURN_KEY = "KeyF";
+
 export class Game implements BotHost {
   readonly scene: THREE.Scene;
   readonly world: RAPIER.World;
@@ -2377,6 +2380,8 @@ export class Game implements BotHost {
     if (this.dropStream.size) this.streamDrops();
     this.radio.update(dt, this.match.phase !== "ended");
     this.social?.update(clockDt);
+    // quick turn key (the on-screen button of virtual-keymapping.ts calls quickTurn() directly)
+    if (inp.keyPressed(QUICK_TURN_KEY)) this.quickTurn();
 
     // Respawns
     for (const [id, t] of this.respawnAt) {
@@ -2601,6 +2606,14 @@ export class Game implements BotHost {
     if (hit.normal) { p.addScaledVector(hit.normal, 0.6); if (hit.normal.y > 0.5) p.y += 0.05; } // step off the wall / onto the floor
     this.player.teleportFeet(p, this.player.yaw);
     this.gmNoFallUntil = this.time + 1.5;
+  }
+
+  /** Quick turn: 180 degrees at once (keyboard QUICK_TURN_KEY and the on-screen "Balik badan" button). Not while a menu / popup / chat is open, dead or on the result screen. */
+  quickTurn(): void {
+    const inp = this.input;
+    if (!inp.locked || !this.me.alive || this.finalOn || this.escMenu?.isOpen || this.respawnMenu?.isOpen || this.social?.modalOpen) return;
+    this.player.addLook(0, Math.PI);
+    this.player.updateCamera();
   }
 
   /** hotkeys + wallhack + ESP, once per frame at the end of update() */

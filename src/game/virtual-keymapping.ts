@@ -1460,6 +1460,15 @@ export class VirtualKeyMapping {
 
     hud.appendChild(sideKeys);
 
+    // Balik badan (quick turn 180 degrees): calls Game.quickTurn() directly, so it never fires the Dual key (F)
+    this.makeButton(hud, {
+      label: "Balik badan",
+      html: ICON.turn,
+      className: "vkm-round",
+      onTap: () => this.game()?.quickTurn?.(),
+      br: { x: 152, y: 84, size: BTN.normal },
+    });
+
     this.makeButton(hud, {
       label: "Jalan pelan",
       html: ICON.walk,

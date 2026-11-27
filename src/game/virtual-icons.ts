@@ -47,6 +47,11 @@ export const ICON_SVG = {
       <path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V10M12 9.5a1.5 1.5 0 0 1 3 0V11M15 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-.5a5.5 5.5 0 0 1-4.6-2.5L4.5 14.5a1.6 1.6 0 0 1 2.6-1.8L9 15"/>
     </svg>`,
 
+  turn: `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <path d="M7 20V9a5 5 0 0 1 10 0v4M13 9.5l4 4 4-4"/>
+    </svg>`,
+
   // utility keys
   swap: `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">

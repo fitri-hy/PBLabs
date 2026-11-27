@@ -9,7 +9,7 @@ import { aiSkill } from "./lobby/core/controller.ts";
 import { showAccountScreen } from "./ui/accountScreen.ts";
 import { installFullscreen } from "./ui/fullscreen.ts";
 import { openDevLauncher, resetDevParams, takeDevSaved } from "./ui/devLauncher.ts";
-import { hideBattleLoading } from "./game/battleLoading.ts";
+import { hideBattleLoading, setBattlePlayers, type BattleLoadingPlayer, type BattleLoadingStatus } from "./game/battleLoading.ts";
 import { loadMapIndex, mapFromRoomMapId, type MapId } from "./config.ts";
 import type { PbBattleNet } from "./net/battle.ts";
 import type { RoomClient } from "./net/roomClient.ts";
@@ -260,16 +260,55 @@ function playBattle(screen: LobbyScreenLike, net: PbBattleNet, room: RoomClient)
  * (every slot's weapons, character and head gear, the bots' weapon in an AI room) load behind the curtain (main.ts
  * prepareGame), so playBattle's startGame after STARTBATTLE + RESPAWN finds them ready.
  */
+/** itemId -> weapon name (weapons.json), for the very small weapon line of the loading screen player table */
+async function weaponNames(): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  try {
+    const j = await jsonOnce<{ weapons: { id: number; name: string }[] }>("/assets/cross/weapons/weapons.json");
+    for (const w of j.weapons) out.set(w.id, w.name);
+  } catch { /* names are optional */ }
+  return out;
+}
+
 async function prepareBattle(screen: LobbyScreenLike, room: RoomClient): Promise<void> {
   if (busy) return; // a game is still up (end screen): playBattle will not take this battle either
   const slot = room.mySlot;
+  // loading screen player table: names right away, weapons once the equipment acks land
+  const names = await weaponNames();
+  const wname = (ids: number[]) => ids.filter((id) => id > 0).map((id) => names.get(id)).filter((n): n is string => !!n).slice(0, 4);
+  const player = screen.player;
+  // status of each row: ready = its equipment ack landed (local: the match finished loading), waiting = not yet, failed = left / load error
+  const seen = new Map<number, BattleLoadingPlayer>();
+  let localStatus: BattleLoadingStatus = "waiting";
+  let localWeaponNames: string[] | undefined;
+  const roster = (): BattleLoadingPlayer[] => {
+    const present = new Set<number>();
+    for (const s of room.slots) {
+      if (!s.nick) continue;
+      present.add(s.slot);
+      const me = s.slot === slot;
+      const ack = room.equipAcks.get(s.slot);
+      seen.set(s.slot, {
+        name: s.nick, team: (s.slot % 2) as 0 | 1, me,
+        rank: me ? player?.state.profile?.rank ?? s.rank : s.rank,
+        weapons: me ? localWeaponNames : ack ? wname(Object.values(ack.weapons) as number[]) : undefined,
+        status: me ? localStatus : ack ? "ready" : "waiting",
+      });
+    }
+    return [...seen].sort((x, y) => x[0] - y[0]).map(([k, p]) => (present.has(k) ? p : { ...p, status: "failed" as const }));
+  };
+  setBattlePlayers(roster());
   // the other slots' USER_EQUIPMENT 3667 comes right after the LOADING_START ack, which resolved first: let it land
   const others = room.slots.filter((s) => s.state >= 12 && s.slot !== slot && s.nick);
-  for (let t = 0; t < 1500 && others.some((s) => !room.equipAcks.has(s.slot)); t += 50) await new Promise((r) => setTimeout(r, 50));
-  const player = screen.player;
+  for (let t = 0; t < 1500 && others.some((s) => !room.equipAcks.has(s.slot)); t += 50) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (t % 250 === 200) setBattlePlayers(roster());
+  }
   const team = (slot % 2) as 0 | 1;
   const e = player ? respawnEquipFor(player, slot, undefined, room.room?.weaponsFlag, room.room?.stage) : null; // what the first RESPAWN sends
   const localWeapons = e ? e.slice(0, 5).map((p) => p.itemId) : [];
+  localWeaponNames = wname(localWeapons);
+  setBattlePlayers(roster());
   const localChara = player ? (team === 0 ? player.teamCharas().red : player.teamCharas().blue) || undefined : undefined;
   const acks = [...room.equipAcks.values()];
   const set = {
@@ -282,7 +321,15 @@ async function prepareBattle(screen: LobbyScreenLike, room: RoomClient): Promise
     bomb: room.room?.roomType === ROOM_BOMB,
   };
   const [m] = await Promise.all([import("./main.ts"), loadMapIndex()]);
-  await m.prepareGame(mapFromRoomMapId(room.room?.mapId ?? 4), set, room.isBotRoom);
+  try {
+    await m.prepareGame(mapFromRoomMapId(room.room?.mapId ?? 4), set, room.isBotRoom);
+    localStatus = "ready";
+  } catch (err) {
+    localStatus = "failed";
+    throw err;
+  } finally {
+    setBattlePlayers(roster());
+  }
 }
 
 if (import.meta.env.DEV) void import("./dev/clickDiag.ts").then((m) => m.installClickDiag());
