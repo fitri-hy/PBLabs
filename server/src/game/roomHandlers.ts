@@ -202,6 +202,9 @@ export function handleCreateRoom(c: GameClient, rd: PacketReader): void {
       ch.rooms.push(r);
       void syncPlayerToFriends(p, false);
       c.session.send(rp.createRoomAck(0, r));
+      // the creator's own seat record:3586 is never sent to the creator (roomClient.create builds that slot locally),
+      // so the country / rank / clan of the seat would never reach it otherwise (the loading screen reads SlotInfo.country)
+      c.session.send(rp.slotOneInfoAck(p, r));
       if (bot) c.session.send(rp.slotInfoAck(r));
       log(`room #${r.roomId} "${r.name}" map ${r.mapId} type ${r.roomType} created by ${p.nickname}`);
       break;

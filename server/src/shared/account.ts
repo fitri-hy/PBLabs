@@ -58,6 +58,8 @@ export class Account {
   inventoryPlus = 0;
   countryFlags = 0;
   ip4Address = "";
+  /** ISO 3166-1 alpha-2 country of the login IP (shared/geoip.ts), set when the account enters a Game session; "" = unknown */
+  country = "";
   macAddress = "";
   token = "";
   status = new AccountStatus();

@@ -7,6 +7,7 @@ import type { I3Gui } from "../../ui/i3Gui.ts";
 import { nickCss, onClick } from "./common.ts";
 import { clanDate } from "../clanRules.ts";
 import { paintMark } from "../clanMarkView.ts";
+import { paintLeaderRank } from "../rankIconView.ts";
 
 /** the list start is one byte on the wire (997 `C start`) */
 const START_LIMIT = 256;
@@ -33,6 +34,10 @@ export class ClanBrowser {
   /** list index of the next page to ask */
   private loadedTo = 0;
   private done = false;
+  /** bumped by reset(): a page that comes back after it belongs to the old list and is dropped */
+  private gen = 0;
+  /** the page read in flight: two calls (scroll, View All, search) must not ask the same start, or the page lands twice */
+  private loading: Promise<void> | null = null;
   private shown: ClanSummary[] = [];
   private top = 0;
   private filter = "";
@@ -63,6 +68,7 @@ export class ClanBrowser {
   reset(): void {
     this.all = []; this.total = 0; this.loadedTo = 0; this.done = false; this.shown = []; this.top = 0; this.filter = ""; this.selected = 0;
     this.details.clear(); this.asking.clear(); this.missing.clear();
+    this.gen++; this.loading = null;
   }
 
   /** the picked clan's detail (null until it arrives) */
@@ -72,11 +78,23 @@ export class ClanBrowser {
 
   private canLoad(): boolean { return !this.done && this.loadedTo < Math.min(this.total || START_LIMIT, START_LIMIT); }
 
-  /** 997: the next page of the list (the first call opens the list) */
-  async loadNext(): Promise<void> {
+  /** 997: the next page of the list (the first call opens the list); one page at a time */
+  loadNext(): Promise<void> {
+    if (!this.loading) {
+      const gen = this.gen;
+      const run = this.readPage(gen).finally(() => { if (this.loading === run) this.loading = null; });
+      this.loading = run;
+    }
+    return this.loading;
+  }
+
+  private async readPage(gen: number): Promise<void> {
     const c = this.client();
     if (!c || !this.canLoad()) return;
-    const r = await c.list(this.loadedTo);
+    let r: Awaited<ReturnType<ClanClient["list"]>>;
+    try { r = await c.list(this.loadedTo); }
+    catch (e) { if (gen === this.gen) { console.warn("[cross] clan list", e); this.failed("list"); this.done = true; } return; }
+    if (gen !== this.gen) return;
     if (!r.ok || !r.data) { this.failed("list"); this.done = true; return; }
     this.total = r.data.total;
     this.all.push(...r.data.clans);
@@ -85,9 +103,13 @@ export class ClanBrowser {
     this.applyFilter();
   }
 
-  /** every page the server can name (search) */
+  /** every page the server can name (search); stops when a page brings nothing (no connection), which used to spin forever */
   async loadAll(): Promise<void> {
-    while (this.canLoad()) await this.loadNext();
+    while (this.canLoad()) {
+      const before = this.loadedTo;
+      await this.loadNext();
+      if (this.loadedTo === before) break;
+    }
     this.applyFilter();
   }
 
@@ -124,8 +146,13 @@ export class ClanBrowser {
     const c = this.client();
     if (!c) return;
     this.asking.add(id);
-    this.detailQueue = this.detailQueue.then(() => c.detail(id)).then((r) => {
-      if (r.ok && r.data) this.details.set(id, r.data); else this.missing.add(id);
+    this.detailQueue = this.detailQueue.then(async () => {
+      let r = await c.detail(id);
+      // the first 801 that comes is taken: a late reply of an earlier ask can be another clan's, so ask once more
+      if (r.ok && r.data && r.data.id !== id) r = await c.detail(id);
+      return r;
+    }).then((r) => {
+      if (r.ok && r.data && r.data.id === id) this.details.set(id, r.data); else this.missing.add(id);
     }, (e) => { this.missing.add(id); console.warn("[cross] clan detail", e); }).finally(() => {
       this.asking.delete(id);
       this.redraw();
@@ -154,6 +181,7 @@ export class ClanBrowser {
     // 0x85950f (clanSearchClanNameValue) / 0x8676fa (clanNonMemberClanNameValue): the name in the clan name colour
     this.gui.setColor(f.name, nickCss(d?.nameColor));
     this.gui.setText(f.master, d?.ownerNick ?? "");
+    paintLeaderRank(this.gui, f.master, d ? d.ownerRank : null); // the leader's rank icon (clan search and no-clan windows)
     this.gui.setText(f.rank, d ? `${d.unit}` : "");
     this.gui.setText(f.staff, d ? `${d.members}/${d.maxPlayers}` : "");
     this.gui.setText(f.order, d ? `${d.rank}` : "");

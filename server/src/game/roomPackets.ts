@@ -68,7 +68,13 @@ function playerSlotFields(w: PacketWriter, a: Account, s: SlotModel, join: boole
   U(w, c.name, 34);
   w.writeC(s.id);
   U(w, a.nickname, 66);
-  w.writeC(a.nickColor).writeC(a.bonus.muzzleColor).writeC(0).writeC(0xff).writeC(0xff);
+  // country of the login IP (shared/geoip.ts) as 2 ISO 3166-1 alpha-2 bytes, 0/0 = unknown. It goes before the record's
+  // last 3 bytes because 3588 is pushed with `H len = N - 2` (src/net/roomClient.ts caveat): the tail of that packet is
+  // dropped by the frame decoder, so the country must not be the last thing in the record.
+  const cc = /^[A-Z]{2}$/.test(a.country) ? a.country : "";
+  w.writeC(a.nickColor).writeC(a.bonus.muzzleColor)
+    .writeC(cc.charCodeAt(0) || 0).writeC(cc.charCodeAt(1) || 0)
+    .writeC(0).writeC(0xff).writeC(0xff);
 }
 
 export function joinRoomAck(err: number, a: Account | null, r: RoomModel | null): Uint8Array {
@@ -79,10 +85,11 @@ export function joinRoomAck(err: number, a: Account | null, r: RoomModel | null)
   w.writeC(18);
   for (const s of r.slots) {
     const p = s.playerId > 0n ? r.svc.getAccount(s.playerId) : null;
-    if (p && s.stealth && !a.isGM() && s.id !== a.slotId) { w.writeC(SlotState.EMPTY).zeros(10).writeD(0xffffffff).zeros(55).writeC(s.id).zeros(66).writeC(0).writeC(0).writeC(0).writeC(0xff).writeC(0xff); continue; } // hidden GM observer
+    // both carry the country bytes of playerSlotFields (0/0) before the last 3, see there
+    if (p && s.stealth && !a.isGM() && s.id !== a.slotId) { w.writeC(SlotState.EMPTY).zeros(10).writeD(0xffffffff).zeros(55).writeC(s.id).zeros(66).writeC(0).writeC(0).zeros(3).writeC(0xff).writeC(0xff); continue; } // hidden GM observer
     w.writeC(s.clientState());
     if (p) playerSlotFields(w, p, s, true);
-    else w.zeros(10).writeD(0xffffffff).zeros(55).writeC(s.id).zeros(66).writeC(0).writeC(0).writeC(0).writeC(0xff).writeC(0xff);
+    else w.zeros(10).writeD(0xffffffff).zeros(55).writeC(s.id).zeros(66).writeC(0).writeC(0).zeros(3).writeC(0xff).writeC(0xff);
   }
   w.writeC(r.killCam).writeC(0).writeC(0).writeC(r.getSlotCount()).writeC(r.leader).writeC(r.countdownTimeLeft()).writeC(4).zeros(4);
   const blob = new Uint8Array(246 + 1);

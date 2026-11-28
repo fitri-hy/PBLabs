@@ -193,7 +193,7 @@ test("catalog 1039/1037/1042 -> offers (real vectors), cache round trip", async 
 test("lobby pages merge, page 0 resets; quick start candidates", () => {
   const l = new LobbyStore();
   const room = (id: number, state: number, players: number) => ({ roomId: id, name: `r${id}`, mapId: 4, rule: 0, stage: 1, roomType: 4, state, players, slots: 16, ping: 3, weaponsFlag: 0, flag: 0, leaderAddr: "" });
-  l.applyPage({ totalRooms: 3, roomPage: 0, rooms: [room(0, 1, 2), room(1, 7, 8)], totalPlayers: 1, playerPage: 0, players: [{ sessionId: 9, clanLogo: 0, clanName: "", rank: 5, nickColor: 0, nickname: "a", nation: 0 }] });
+  l.applyPage({ totalRooms: 3, roomPage: 0, rooms: [room(0, 1, 2), room(1, 7, 8)], totalPlayers: 1, playerPage: 0, players: [{ sessionId: 9, clanLogo: 0, clanName: "", rank: 5, nickColor: 0, nickname: "a", country: "" }] });
   l.applyPage({ totalRooms: 3, roomPage: 1, rooms: [room(2, 1, 5)], totalPlayers: 1, playerPage: 1, players: [] });
   assert.equal(l.roomList().length, 3);
   assert.deepEqual(l.quickStartCandidates().map((r) => r.roomId), [2, 0]);

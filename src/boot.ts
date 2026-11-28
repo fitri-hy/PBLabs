@@ -291,6 +291,7 @@ async function prepareBattle(screen: LobbyScreenLike, room: RoomClient): Promise
       seen.set(s.slot, {
         name: s.nick, team: (s.slot % 2) as 0 | 1, me,
         rank: me ? player?.state.profile?.rank ?? s.rank : s.rank,
+        country: s.country,
         weapons: me ? localWeaponNames : ack ? wname(Object.values(ack.weapons) as number[]) : undefined,
         status: me ? localStatus : ack ? "ready" : "waiting",
       });

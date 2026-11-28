@@ -232,6 +232,8 @@ export interface SlotInfo {
   /** name-card outline colour index (1600205; 0 = none) and muzzle flash colour index (1600187; 0 = none): full records and 3671 / 3639 */
   nickBorderColor?: number;
   muzzleColor?: number;
+  /** ISO 3166-1 alpha-2 country of the player's IP (server roomPackets playerSlotFields), "" when unknown */
+  country?: string;
 }
 
 export interface MatchEndpoint {
@@ -346,8 +348,16 @@ function parseSlotRecord(r: PacketReader, team: number): SlotInfo {
   const nickBorderColor = r.readC();
   r.pos = base + 138;
   const muzzleColor = r.readC();
-  r.pos = Math.min(r.data.length, base + 142);
-  return { slot, state, team, nick, rank, auth, cafe, clan, nickColor, clanLogo, nickBorderColor, muzzleColor };
+  // country of the player's IP (server roomPackets playerSlotFields): 2 ISO 3166-1 alpha-2 bytes before the record's
+  // tail — 3588 is pushed with `H len = N - 2`, so the payload can be missing the last 2 bytes of this record
+  let country = "";
+  r.pos = base + 139;
+  if (r.remaining >= 2) {
+    const cc = String.fromCharCode(r.readC(), r.readC());
+    if (/^[A-Z]{2}$/.test(cc)) country = cc;
+  }
+  r.pos = Math.min(r.data.length, base + 144);
+  return { slot, state, team, nick, rank, auth, cafe, clan, nickColor, clanLogo, nickBorderColor, muzzleColor, country };
 }
 
 type Handler = (r: PacketReader) => void;
@@ -683,8 +693,10 @@ export class RoomClient {
     this.room = parseRoomInfoBlock(r);
     this.mySlot = 0;
     this.leaderSlot = 0;
+    // the 3588 of this seat (sent by the server right after the create ack) can land before this continuation: keep what it parsed
+    const own = this.slots[0]?.country;
     this.slots = Array.from({ length: 18 }, (_, i) => ({ slot: i, state: 0, team: i % 2, nick: "", rank: 0 }));
-    this.slots[0] = { slot: 0, state: 12, team: 0, nick: this.room.leaderName, rank: 0 };
+    this.slots[0] = { slot: 0, state: 12, team: 0, nick: this.room.leaderName, rank: 0, country: own };
     this.changed();
     return this.room;
   }

@@ -10,6 +10,7 @@ import * as db from "../db.ts";
 import { TcpSession } from "../net/tcpSession.ts";
 import { Account, AccessLevel } from "../shared/account.ts";
 import * as dao from "../shared/dao.ts";
+import { countryOf } from "../shared/geoip.ts";
 import * as pu from "../shared/playerUtils.ts";
 import { runningQuestEvent } from "../shared/data.ts";
 import { shop, getGood } from "../shared/shop.ts";
@@ -136,6 +137,7 @@ async function enterAccount(c: GameClient, username: string, playerId: bigint): 
   await pu.validatePlayerInventoryStatus(p); // Game CreateCharacter also sends 3334 + 6146 (only when a char item lacks a character)
   p.clan = await dao.getClanDB(p.clanId);
   p.session = { sessionId: c.session.sessionId, playerId: p.playerId };
+  p.country = countryOf(c.session.ip); // the flag beside the nick in the lobby Waiting List (client screensCross)
   p.status.serverId = c.serverId & 0xff;
   await updateStatus(p);
   onlineAccounts.set(p.playerId, p);
@@ -218,7 +220,11 @@ function lobbyPlayerEntry(a: Account): Uint8Array {
   gp.syncU(w, a.clan.name, 34);
   w.writeC(a.getRank()).writeC(0).writeC(a.nickColor);
   gp.syncU(w, a.nickname, 66);
-  return w.writeC(a.config.nations).writeC(0).writeD(a.equipment.nameCardId).writeC(a.bonus.nickBorderColor).writeC(0).toBytes();
+  // country of the player's IP as two ISO-3166-1 alpha-2 bytes (0,0 = unknown) where the exe's `nations` config byte sat:
+  // the client paints it as the flag at the right of the Waiting List row (geoip.ts / screensCross nationFlag.ts)
+  const cc = a.country || "";
+  w.writeC(cc.charCodeAt(0) || 0).writeC(cc.charCodeAt(1) || 0);
+  return w.writeD(a.equipment.nameCardId).writeC(a.bonus.nickBorderColor).writeC(0).toBytes();
 }
 
 function roomListEntry(r: RoomModel): Uint8Array {

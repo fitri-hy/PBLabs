@@ -10,6 +10,7 @@
 import { UI_BASE } from "../lobby/ui/assets.ts";
 import { guiFont } from "../lobby/ui/i3Gui.ts";
 import { tOr } from "../lobby/ui/i18n.ts";
+import { flagSrc } from "../lobby/screensCross/nationFlag.ts";
 import { CROSS_HUD } from "./pbHud/crossAssets.ts";
 
 /** ready = green check, waiting = yellow clock, failed = red cross */
@@ -23,6 +24,8 @@ export interface BattleLoadingPlayer {
   weapons?: string[];
   /** patente (SlotInfo.rank): shown as an icon at the left of the row */
   rank?: number;
+  /** country of the player's IP (SlotInfo.country): the flag column; missing / "" = the gray "?" flag */
+  country?: string;
   /** load status shown at the right edge of the row (default: waiting) */
   status?: BattleLoadingStatus;
   /** the local player (highlighted row) */
@@ -164,7 +167,7 @@ function teamTable(team: 0 | 1, players: BattleLoadingPlayer[]): HTMLElement {
   if (!players.length) {
     const tr = document.createElement("tr");
     const empty = cell("td", "-", { textAlign: "center", opacity: "0.5", height: "var(--rh)" });
-    empty.colSpan = 3;
+    empty.colSpan = 4;
     tr.append(empty);
     tbody.append(tr);
   }
@@ -196,6 +199,22 @@ function teamTable(team: 0 | 1, players: BattleLoadingPlayer[]): HTMLElement {
     }
     tr.append(nameTd);
 
+    // country flag (same art as the lobby and the ready room, but always visible: no pulse): the real flag, or the gray "?". Sits right before the status icon, on the right edge.
+    const flagTd = cell("td", "", { width: "calc(var(--rh) * 0.85)", padding: "0 calc(var(--rh) * 0.08) 0 0", verticalAlign: "middle" });
+    const fsrc = flagSrc(p.country ?? "");
+    if (fsrc) {
+      const f = document.createElement("img");
+      f.alt = p.country || "?";
+      f.title = p.country || "unknown country";
+      Object.assign(f.style, {
+        display: "block", margin: "0 auto", width: "calc(var(--rh) * 0.62)", height: "calc(var(--rh) * 0.62)",
+        objectFit: "cover", boxShadow: "inset 0 0 0 1px rgba(0,0,0,.4)",
+      });
+      f.src = fsrc;
+      flagTd.append(f);
+    }
+    tr.append(flagTd);
+
     // status (right edge)
     const stTd = cell("td", "", { width: "calc(var(--rh) * 0.9)", padding: "0 clamp(4px, 0.9vw, 10px) 0 0", verticalAlign: "middle" });
     stTd.append(statusIcon(p.status ?? "waiting"));
@@ -221,13 +240,13 @@ export function setBattlePlayers(players: BattleLoadingPlayer[]): void {
 
 /** room.slots (+ room.mySlot) -> table rows. `weaponsOf(slot)` = the weapon names of that slot, when known. Empty slots (no nick) are skipped. */
 export function playersFromRoom(
-  room: { slots: { slot: number; nick: string; rank?: number }[]; mySlot: number },
+  room: { slots: { slot: number; nick: string; rank?: number; country?: string }[]; mySlot: number },
   weaponsOf?: (slot: number) => string[] | undefined,
 ): BattleLoadingPlayer[] {
   const out: BattleLoadingPlayer[] = [];
   for (const s of room.slots) {
     if (!s.nick) continue;
-    out.push({ name: s.nick, team: (s.slot % 2) as 0 | 1, weapons: weaponsOf?.(s.slot), rank: s.rank, me: s.slot === room.mySlot });
+    out.push({ name: s.nick, team: (s.slot % 2) as 0 | 1, weapons: weaponsOf?.(s.slot), rank: s.rank, country: s.country, me: s.slot === room.mySlot });
   }
   return out;
 }

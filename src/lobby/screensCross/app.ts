@@ -33,6 +33,7 @@ import { AI_GRADE_KEYS, CHAT_TAB, CLOCK_MODES, CROSS_CLICK, CROSS_HIDDEN, CROSS_
 import { mapFromRoomMapId, mapIndexEntry } from "../../config.ts";
 import { NICK_COLORS } from "../../game/battleChatModel.ts";
 import { markAtlas, paintMark } from "./clanMarkView.ts";
+import { setNationFlag } from "./nationFlag.ts";
 import { paintShapeIndex, setIconRedraw } from "./iconCanvas.ts";
 import { chat } from "../../net/chatClient.ts";
 import { CrossState, FriendErr, crossState, findUser, friendList, requestFriend } from "../../net/friendClient.ts";
@@ -310,6 +311,8 @@ export class LobbyScreenCross {
       gui.build(node, this.stage.design, f.ox, f.oy);
     }
     for (const n of CROSS_HIDDEN) gui.hide(n);
+    this.layoutWaitingList();
+    this.layoutTeamRows();
     gui.hide("rrCreateMapPopup");
     gui.hide("rrTrainingDifficultyPopup");
     gui.hide("RandomMapWin");
@@ -520,6 +523,46 @@ export class LobbyScreenCross {
       if (!b) continue;
       b.el.style.cursor = "pointer";
       b.el.addEventListener("click", () => { playUiSound(CROSS_SOUND[name]); this.ctl.click("hit", `sort:${key}`); });
+    }
+  }
+
+  /**
+   * Waiting List rows (once, at build): the export ships `lbUserListSlotNation%d` on top of the rank icon and a nick box
+   * that runs to the row's edge, so the flag control moves to the right edge (x 168..188 of the 192 px row, y -22 = the
+   * same line as the clan / rank icons) and the nick shrinks to 164 and clips: a long name ellipsizes instead of running
+   * under the flag. The exe never placed this control (it sits in CROSS_HIDDEN); setNationFlag reveals it per row.
+   */
+  private layoutWaitingList(): void {
+    const gui = this.gui!;
+    for (let i = 1; i <= USER_ROWS; i++) {
+      const nat = gui.get(`lbUserListSlotNation${i}`);
+      if (nat) { nat.node.x = 168; nat.node.y = -22; nat.el.style.left = "168px"; nat.el.style.top = "-22px"; }
+      const nick = gui.get(`lbUserListSlotNick${i}`);
+      if (!nick) continue;
+      nick.node.w = 112; // 52 + 112 = 164: 4 px of gap before the flag at 168
+      if (nick.node.txt) nick.node.txt.wrap = 0; // one line: the engine wrap would drop a long name onto the row below
+      nick.el.style.width = "112px";
+      // the engine text is a flex column that never clips (i3Gui.text): block + nowrap + ellipsis keeps its middle
+      // alignment (txt align v = 1) and cuts the overflow at the box
+      const t = nick.el.querySelector<HTMLElement>(":scope > .op-text");
+      if (t) Object.assign(t.style, { width: "112px", display: "block", lineHeight: `${nick.node.h}px`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
+    }
+  }
+
+  /**
+   * Ready-room rows (once, at build): the export ships `rr{Red,Blue}Nation%d` on the rank cell (x 49, hidden with the
+   * other unported marks), so the flag control moves to the row's far left — x 6..26 of the 290 px team box, left of the
+   * clan mark (30..50), clear of the state badge (222..265) and the kick button (266..284); y -21 = the same line as the
+   * clan / rank / state icons. setNationFlag reveals it per row.
+   */
+  private layoutTeamRows(): void {
+    const gui = this.gui!;
+    for (const team of ["Red", "Blue"] as const) {
+      for (let i = 1; i <= TEAM_ROWS; i++) {
+        const nat = gui.get(`rr${team}Nation${i}`);
+        // the parent rr{team}Open%d sits at abs x 5, so rel 1 = abs 6..26 inside the row
+        if (nat) { nat.node.x = 1; nat.node.y = -21; nat.el.style.left = "1px"; nat.el.style.top = "-21px"; }
+      }
     }
   }
 
@@ -1357,6 +1400,7 @@ export class LobbyScreenCross {
       gui.setColor(`lbUserListSlotNick${i + 1}`, `rgb(${(NICK_COLORS[u?.nickColor ?? 0] ?? NICK_COLORS[0]).join(",")})`);
       this.rankIcon(`lbUserListSlotRank${i + 1}`, u ? u.rank : null);
       paintMark(gui, `lbUserListClanMark${i + 1}`, u ? u.clanLogo : null);
+      setNationFlag(gui, `lbUserListSlotNation${i + 1}`, u ? u.country ?? "" : null);
     }
     // Buscar hit (community.ts findFriend, exe 0x885b70): the picked row's band (lbUserListSlotSelect) over its slot, if on screen
     const pick = users.findIndex((u) => u.nickname === c.lobbyPick), row = pick - this.userTop;
@@ -1546,6 +1590,9 @@ export class LobbyScreenCross {
     const randomOn = ((info?.opts?.flag ?? 0) & STAGE_RANDOM_MAP) !== 0 && !r.isBotRoom;
     this.mapImage("rrImageDummy", randomOn ? "random" : info?.mapId ?? null, modeTag(r.isBotRoom, info?.roomType ?? 4));
     const slotCount = info?.slotCount ?? 16, myRank = c.chrome().rank;
+    // your own seat record never crosses the wire on ROOM_CREATE (roomClient create() builds it locally), so your flag
+    // comes from the lobby list (2588), which carries your country like everyone else's
+    const myCountry = c.session?.lobby.playerList().find((u) => u.nickname === c.chrome().nickname)?.country ?? "";
     // the picked slot (ev0 0x7ca810 moves rrRedSelect / rrBlueSelect and hides the other team's): the inspected player, else mine
     const picked = c.inspect?.slot ?? r.mySlot;
     for (const [t, team] of [[0, "Red"], [1, "Blue"]] as const) {
@@ -1567,6 +1614,9 @@ export class LobbyScreenCross {
         this.rankIcon(`rr${team}Rank${k}`, used ? (slot === r.mySlot && myRank ? myRank : x!.rank) : null);
         // emblem of the slot's clan (_SetClanInfoInSlot); 0xFFFFFFFF / no clan hides it
         paintMark(gui, `rr${team}ClanMark${k}`, used ? this.slotClan(slot).logo : null);
+        // flag of the country the server resolved from the player's IP (roomPackets playerSlotFields -> SlotInfo.country):
+        // the row's far left (layoutTeamRows); null = an empty / closed seat, "" = an unknown country (gray "?" flag)
+        setNationFlag(gui, `rr${team}Nation${k}`, used ? (slot === r.mySlot && myCountry ? myCountry : x!.country ?? "") : null);
         // PC-cafe icon by the record's cafe byte (switch 0x7d05a0)
         const pc = used ? PC_CAFE_SHAPE[x!.cafe ?? 0] : undefined;
         gui.show(`rr${team}Pc${k}`, pc !== undefined);

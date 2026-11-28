@@ -8,6 +8,7 @@ import { ClanWarClient, ClanWarErr, type ClanWarEvent, type TeamInfo, type TeamR
 import type { ClanDetail } from "../../../net/clanClient.ts";
 import type { GNode, I3Gui } from "../../ui/i3Gui.ts";
 import { buildWindows, nickCss, onClick, pageGui, type PageCtx, type Texts } from "./common.ts";
+import { paintLeaderRank, paintRankIcon } from "../rankIconView.ts";
 
 /** MakeTeam rows (clanBattlePhase, 6 slots) and team list rows (7). The MakeTeam pitch is [INFERIDO]: the six rows are authored at
  *  one place inside a 437 px list, so each row is moved down by one pitch (6 x 72 fits). */
@@ -240,9 +241,14 @@ export class ClanBattle {
   private async refreshList(): Promise<void> {
     const c = this.api();
     if (!c) return;
-    const r = await c.list();
-    if (r.ok && r.data) { this.teams = r.data.teams; this.listTop = Math.max(0, Math.min(this.listTop, this.teams.length - LIST_ROWS)); }
-    else console.warn("[cross] clan battle list", r.err);
+    try {
+      const r = await c.list();
+      if (r.ok && r.data) {
+        this.teams = r.data.teams;
+        this.listTop = Math.max(0, Math.min(this.listTop, this.teams.length - LIST_ROWS));
+        this.makeTop = Math.max(0, Math.min(this.makeTop, this.teams.length - MAKE_ROWS));
+      } else console.warn("[cross] clan battle list", r.err);
+    } catch (e) { console.warn("[cross] clan battle list", e); } // timeout: the old list stays
     this.draw();
   }
 
@@ -296,9 +302,11 @@ export class ClanBattle {
     const c = this.api();
     if (!c || !this.team) return;
     if (!this.isLeader()) { this.say(this.str("STBL_IDX_CLAN_BATTLE_MODIFY_ONLY_LEADER", "Only the Leader can make changes.")); return; }
-    const r = await c.setOperation(text);
-    if (r.ok && r.data !== undefined) this.operation = r.data;
-    else this.say(this.failText("operation", r.err));
+    try {
+      const r = await c.setOperation(text);
+      if (r.ok && r.data !== undefined) this.operation = r.data;
+      else this.say(this.failText("operation", r.err));
+    } catch (e) { console.warn("[cross] clan battle operation", e); this.say(this.failText("operation", 0)); }
     this.draw();
   }
 
@@ -307,9 +315,11 @@ export class ClanBattle {
     const c = this.api();
     if (!c || !this.team) return;
     if (!this.isLeader()) { this.say(this.str("STBL_IDX_CLAN_BATTLE_MODIFY_ONLY_LEADER", "Only the Leader can make changes.")); return; }
-    const r = await c.setMaxPer(max);
-    if (r.ok && r.data !== undefined && this.team) this.team = { ...this.team, capacity: r.data };
-    else this.say(this.failText("maxPer", r.err));
+    try {
+      const r = await c.setMaxPer(max);
+      if (r.ok && r.data !== undefined && this.team) this.team = { ...this.team, capacity: r.data };
+      else this.say(this.failText("maxPer", r.err));
+    } catch (e) { console.warn("[cross] clan battle max per", e); this.say(this.failText("maxPer", 0)); }
     this.draw();
   }
 
@@ -416,7 +426,10 @@ export class ClanBattle {
     for (let s = 0; s < SEATS; s++) {
       const m = r?.members.find((x) => x.seat === s);
       const i = s + 1;
-      l.show(`clanBattleLobbyMyTeamMemberRank${i}`, false);
+      // the member's rank icon (6921 carries the rank)
+      l.show(`clanBattleLobbyMyTeamMemberRank${i}`, !!m);
+      l.setText(`clanBattleLobbyMyTeamMemberRank${i}`, "");
+      paintRankIcon(l, `clanBattleLobbyMyTeamMemberRank${i}`, m ? m.rank : null);
       l.show(`clanBattleLobbyMyTeamMemberState${i}`, false);
       l.show(`clanBattleLobbyMyTeamMemberNick${i}`, !!m);
       l.show(`clanBattleLobbyMyTeamMemberLeader${i}`, !!m && r?.leader === s);
@@ -458,6 +471,7 @@ export class ClanBattle {
     // 0x86ee0c: 0x4ad850(ClanInfoNameValue, name +4, clan name colour +0x20)
     l.setColor("clanBattleLobbyClanInfoNameValue", nickCss(d?.nameColor));
     l.setText("clanBattleLobbyClanInfoMasterValue", d?.ownerNick ?? "");
+    paintLeaderRank(l, "clanBattleLobbyClanInfoMasterValue", d ? d.ownerRank : null);
     l.setText("clanBattleLobbyClanInfoRankValue", d ? `${d.unit}` : "");
     l.setText("clanBattleLobbyClanInfoStaffValue", d ? `${d.members}/${d.maxPlayers}` : "");
     l.setText("clanBattleLobbyClanInfoOrderValue", d ? `${d.rank}` : "");

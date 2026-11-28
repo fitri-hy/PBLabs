@@ -43,7 +43,8 @@ export interface LobbyPlayer {
   rank: number;
   nickColor: number;
   nickname: string;
-  nation: number;
+  /** ISO 3166-1 alpha-2 country of the player's IP (server geoip.ts), "" when unknown */
+  country: string;
 }
 
 export interface RoomListPage {
@@ -100,9 +101,11 @@ export function parseRoomList(r: PacketReader): RoomListPage {
     r.readC();
     const nickColor = r.readC();
     const nickname = r.readU(66);
-    const nation = r.readC();
-    r.skip(1 + 4 + 1 + 1); // 0, namecard id, nick border color, 0
-    players.push({ sessionId, clanLogo, clanName, rank, nickColor, nickname, nation });
+    // country of the player's IP: two ISO-3166-1 alpha-2 bytes (0,0 = unknown) where the exe's `nations` byte sat
+    const c1 = r.readC(), c2 = r.readC();
+    const country = c1 && c2 ? String.fromCharCode(c1, c2) : "";
+    r.skip(4 + 1 + 1); // namecard id, nick border color, 0
+    players.push({ sessionId, clanLogo, clanName, rank, nickColor, nickname, country });
   }
   return { totalRooms, roomPage, rooms, totalPlayers, playerPage, players };
 }

@@ -15,6 +15,7 @@ import { ClanBrowser, type BrowseNames } from "./clanBrowser.ts";
 import { CLAN_MARK_DEFAULT, decodeClanMark } from "../../clanMark.ts";
 import { applyClanMark, checkClanMark, clanMarkItem, clanMarkPicker, type MarkHooks } from "../clanMarkPicker.ts";
 import { paintMark } from "../clanMarkView.ts";
+import { paintLeaderRank, paintRankIcon, registerControls } from "../rankIconView.ts";
 import { paintNodeIcons } from "../iconCanvas.ts";
 import { BATTLE_TEXTS, ClanBattle } from "./clanBattle.ts";
 
@@ -144,6 +145,8 @@ export class ClanPage {
   private requests: ClanJoinRequest[] = [];
   private checked = new Set<string>();
   private reqChecked = new Set<string>();
+  /** first visible row of the info tab member list (7 rows), the management member list (12) and the request list (12) */
+  private infoTop = 0;
   private memberTop = 0;
   private reqTop = 0;
   private reqSel = -1;
@@ -162,6 +165,11 @@ export class ClanPage {
   private battle: ClanBattle;
   /** repaint of every button (its state sprite follows the access) */
   private repaints: (() => void)[] = [];
+  /** a membership read in flight (refresh): pushes that arrive meanwhile ask for one more read when it ends */
+  private refreshing: Promise<void> | null = null;
+  private refreshAgain = false;
+  /** scroll thumbs of the lists (null: the window has no scroll control for it) */
+  private thumbs: Record<"info" | "member" | "request", ((top: number, total: number, visible: number) => void) | null> = { info: null, member: null, request: null };
 
   static async create(ctx: PageCtx): Promise<ClanPage> {
     const [root, popRoot] = await Promise.all([loadPack("UI_Project_Clan"), jsonOnce<{ root: GNode }>(`${BASE}/UI_Project_Popup.json`)]);
@@ -173,6 +181,7 @@ export class ClanPage {
     this.pop = pageGui(ctx, POP_TEXTS);
     buildWindows(this.gui, ctx, root, WINDOWS);
     buildWindows(this.pop, ctx, popRoot, POPUPS);
+    { const names: string[] = []; const walk = (n: GNode): void => { names.push(n.name); n.children?.forEach(walk); }; walk(root); registerControls(names); }
     for (const w of WINDOWS) this.hideMatching(this.gui, root, w, HIDDEN);
     for (const p of POPUPS) this.hideMatching(this.pop, popRoot, p, POP_HIDDEN);
     // the window roots cover the whole design and pass the pointer through; pointer-events is inherited, so the panels (and
@@ -257,7 +266,27 @@ export class ClanPage {
     this.memoBox = this.area(p, "clanSubscriptionPopupMemoEdit", 127);
     this.noticeBox = this.area(g, "clanManagementWritingBoardNoticeTextBox", 255);
     this.guideBox = this.area(g, "clanManagementWritingBoardGuideTextBox", 255);
+    this.wireScroll();
   }
+
+  /** the member and request lists showed only their first rows (nothing moved their top): wheel over the list, and its scroll control when the window has one */
+  private wireScroll(): void {
+    const g = this.gui;
+    const lists: { key: "info" | "member" | "request"; scrolls: string[]; frames: string[]; step: (d: number) => void }[] = [
+      { key: "info", scrolls: ["clanMemberListScrollList"], frames: ["clanMemberListFrame", "clanInfoPhase"], step: (d) => this.scrollInfo(d) },
+      { key: "member", scrolls: ["clanManagementListScrollList", "clanManagementMemberScrollList"], frames: ["clanManagementMemberPhase"], step: (d) => this.scrollMembers(d) },
+      { key: "request", scrolls: ["clanSubscriptionListScrollList"], frames: ["clanManagementSubscriptionPhase"], step: (d) => this.scrollRequests(d) },
+    ];
+    for (const l of lists) {
+      for (const f of [...l.scrolls, ...l.frames]) g.get(f)?.el.addEventListener("wheel", (e) => { e.preventDefault(); l.step(Math.sign(e.deltaY)); }, { passive: false });
+      const sc = l.scrolls.find((n) => g.get(n));
+      this.thumbs[l.key] = sc ? g.scrollList(sc, l.step) : null;
+    }
+  }
+
+  private scrollInfo(d: number): void { this.infoTop = Math.max(0, Math.min(this.members.length - INFO_ROWS, this.infoTop + d)); this.draw(); }
+  private scrollMembers(d: number): void { this.memberTop = Math.max(0, Math.min(this.members.length - MANAGE_ROWS, this.memberTop + d)); this.draw(); }
+  private scrollRequests(d: number): void { this.reqTop = Math.max(0, Math.min(this.requests.length - MANAGE_ROWS, this.reqTop + d)); this.draw(); }
 
   /** a multi-line box over an EditBox control (the exe's TextBox); `max` characters (the server's byte limit / 2) */
   private area(gui: I3Gui, name: string, max: number): HTMLTextAreaElement | null {
@@ -293,6 +322,7 @@ export class ClanPage {
     this.popup = null;
     this.dropdown = null;
     this.checked.clear(); this.reqChecked.clear();
+    this.infoTop = 0; this.memberTop = 0; this.reqTop = 0; this.reqSel = -1;
     this.outside.reset(); this.search.reset();
   }
 
@@ -323,7 +353,23 @@ export class ClanPage {
       case "deported":
         this.clanLost();
         return;
-      case "master": case "staff": case "regular": case "member-insert": case "member-leave": case "member-status":
+      case "member-status": {
+        // a presence change: patch the row, no full read (that was one 769 + 800 + every member page per status push)
+        const m = this.members.find((x) => x.playerId === ev.playerId);
+        if (m) { m.status = ev.status; this.draw(); return; }
+        break;
+      }
+      case "member-leave": {
+        if (this.members.some((x) => x.playerId === ev.playerId)) {
+          this.members = this.members.filter((x) => x.playerId !== ev.playerId);
+          this.checked.delete(ev.playerId.toString());
+          if (this.detail) this.detail.members = Math.max(0, this.detail.members - 1);
+          this.draw();
+          return;
+        }
+        break;
+      }
+      case "master": case "staff": case "regular": case "member-insert":
         break;
       default:
         return;
@@ -336,6 +382,7 @@ export class ClanPage {
   private clanLost(): void {
     this.clanId = 0; this.access = 0; this.detail = null; this.members = []; this.requests = [];
     this.checked.clear(); this.reqChecked.clear();
+    this.infoTop = 0; this.memberTop = 0; this.reqTop = 0; this.reqSel = -1;
     this.syncProfile(0, 0, "");
     this.outside.reset(); this.search.reset();
     this.battle.reset();
@@ -350,12 +397,25 @@ export class ClanPage {
     s.player.dispatch({ type: "profile", basic: { ...p, clanId, clanAccess: access, clanName: name } });
   }
 
-  /** 769: the membership (clanId, access; a pending applicant has an id with access 0) and the data of the menu */
-  private async refresh(): Promise<void> {
+  /** 769: the membership. One read at a time, and never held back by `busy`: the actions that end in a read (leader change, leaving,
+   * disbanding) run it while busy is still set, which used to make it return at once and leave the window stale / the clan list empty. */
+  private refresh(): Promise<void> {
+    if (this.refreshing) { this.refreshAgain = true; return this.refreshing; }
+    const run = (async () => {
+      try {
+        do { this.refreshAgain = false; await this.readMembership(); } while (this.refreshAgain);
+      } catch (e) { console.warn("[cross] clan refresh", e); }
+      finally { this.refreshing = null; this.draw(); }
+    })();
+    this.refreshing = run;
+    return run;
+  }
+
+  private async readMembership(): Promise<void> {
     const c = this.api();
-    if (!c || this.busy) return;
+    if (!c) return;
     const r = await c.enter();
-    if (!r.ok || !r.data) { this.draw(); return; }
+    if (!r.ok || !r.data) return;
     const e = r.data;
     const had = this.clanId;
     this.clanId = e.clanId; this.access = e.access;
@@ -368,13 +428,15 @@ export class ClanPage {
       if (had) this.syncProfile(0, 0, "");
       if (!this.outside.count) void this.outside.loadNext();
     }
-    this.draw();
   }
 
   /** my clan: detail (800), every member page (802 / 804), the requests when leader or staff (816 / 818) */
   private async loadMine(c: ClanClient): Promise<void> {
-    const d = await c.detail(this.clanId);
-    this.detail = d.ok && d.data ? d.data : null;
+    let d = await c.detail(this.clanId);
+    // ClanClient takes the first 801 that comes: a late reply of a clan the search tab asked for can arrive here, so ask once more
+    if (d.ok && d.data && d.data.id !== this.clanId) d = await c.detail(this.clanId);
+    if (d.ok && d.data && d.data.id === this.clanId) this.detail = d.data;
+    else if (this.detail?.id !== this.clanId) this.detail = null; // a failed read keeps the detail already on screen
     const mc = await c.memberContext();
     const pages = mc.ok && mc.data ? mc.data.pages : 0;
     const rows: ClanMemberRow[] = [];
@@ -394,6 +456,12 @@ export class ClanPage {
         this.requests.push(...q.data.requests);
       }
     }
+    // rows that are gone: their checks, the list tops and the picked request
+    const have = new Set(this.members.map((m) => m.playerId.toString()));
+    for (const k of [...this.checked]) if (!have.has(k)) this.checked.delete(k);
+    const asked = new Set(this.requests.map((q) => q.playerId.toString()));
+    for (const k of [...this.reqChecked]) if (!asked.has(k)) this.reqChecked.delete(k);
+    if (this.reqSel >= this.requests.length) this.reqSel = this.requests.length - 1;
     if (this.detail) this.syncProfile(this.clanId, this.access, this.detail.name);
   }
 
@@ -711,6 +779,7 @@ export class ClanPage {
     // 0x853d8a: 0x4ad850(clanMyClanNameValue, name, clan name colour) = the nick colour table 0xb210a4
     g.setColor("clanMyClanNameValue", nickCss(d?.nameColor));
     g.setText("clanMyClanMasterValue", d?.ownerNick ?? "");
+    paintLeaderRank(g, "clanMyClanMasterValue", d ? d.ownerRank : null);
     g.setText("clanMyClanRankValue", d ? `${d.unit}` : "");
     g.setText("clanMyClanStaffValue", d ? `${d.members}/${d.maxPlayers}` : "");
     g.setText("clanMyClanAddressValue", "");
@@ -726,8 +795,8 @@ export class ClanPage {
 
   private paintInfoList(): void {
     const g = this.gui;
-    const top = Math.max(0, Math.min(this.members.length - INFO_ROWS, this.memberTop));
-    this.memberTop = top;
+    const top = Math.max(0, Math.min(this.members.length - INFO_ROWS, this.infoTop));
+    this.infoTop = top;
     for (let i = 1; i <= INFO_ROWS; i++) {
       const m = this.members[top + i - 1];
       g.show(`clanMemberListNick${i}`, !!m);
@@ -736,9 +805,12 @@ export class ClanPage {
       g.setText(`clanMemberListNick${i}`, m?.nick ?? "");
       // 0x855dda: 0x4ad850(clanMemberListNick, nick +0xc, nick colour +0x3b)
       g.setColor(`clanMemberListNick${i}`, nickCss(m?.nickColor));
-      g.setText(`clanMemberListClass${i}`, m ? `${m.rank}` : "");
+      // the level column is the rank icon (the number is its tooltip)
+      g.setText(`clanMemberListClass${i}`, "");
+      paintRankIcon(g, `clanMemberListClass${i}`, m ? m.rank : null);
       g.setText(`clanMemberListState${i}`, m ? presenceText((k, f) => this.str(k, f), m.status) : "");
     }
+    this.thumbs.info?.(top, this.members.length, INFO_ROWS);
   }
 
   private paintManagement(): void {
@@ -760,6 +832,7 @@ export class ClanPage {
     const g = this.gui;
     const top = Math.max(0, Math.min(this.members.length - MANAGE_ROWS, this.memberTop));
     this.memberTop = top;
+    this.thumbs.member?.(top, this.members.length, MANAGE_ROWS);
     g.paintCheck("clanManagementListHeadCheckAll", this.members.length > 0 && this.members.every((m) => this.checked.has(m.playerId.toString())));
     for (let i = 1; i <= MANAGE_ROWS; i++) {
       const m = this.members[top + i - 1];
@@ -767,7 +840,8 @@ export class ClanPage {
       g.setText(`clanManagementListNick${i}`, m?.nick ?? "");
       // 0x85eeb7: 0x4ad850(clanManagementListNick, nick +0xc, nick colour +0x3b)
       g.setColor(`clanManagementListNick${i}`, nickCss(m?.nickColor));
-      g.setText(`clanManagementListClass${i}`, m ? `${m.rank}` : "");
+      g.setText(`clanManagementListClass${i}`, "");
+      paintRankIcon(g, `clanManagementListClass${i}`, m ? m.rank : null);
       g.setText(`clanManagementListDay${i}`, m ? clanDate(m.joinDate) : "");
       g.paintCheck(`clanManagementListCheck${i}`, !!m && this.checked.has(m.playerId.toString()));
     }
@@ -777,6 +851,7 @@ export class ClanPage {
     const g = this.gui;
     const top = Math.max(0, Math.min(this.requests.length - MANAGE_ROWS, this.reqTop));
     this.reqTop = top;
+    this.thumbs.request?.(top, this.requests.length, MANAGE_ROWS);
     g.paintCheck("clanSubscriptionListHeadCheckAll", this.requests.length > 0 && this.requests.every((q) => this.reqChecked.has(q.playerId.toString())));
     for (let i = 1; i <= MANAGE_ROWS; i++) {
       const q = this.requests[top + i - 1];
